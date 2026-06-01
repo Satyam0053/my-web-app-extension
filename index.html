@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inventory Tracker</title>
+  <?!= include('styles'); ?>
+
+  <style>
+  /* ── LOGIN OVERLAY ───────────────────────────────────────────
+     Shown when no valid session exists.
+     Hidden once login succeeds. Never uses document.write.
+     google.script.run stays available throughout.
+  ──────────────────────────────────────────────────────────── */
+  #loginOverlay {
+    position: fixed; inset: 0; z-index: 99999;
+    display: flex; align-items: center; justify-content: center;
+    padding: clamp(12px,4vw,24px);
+    background: #0f0f0f;
+    overflow: hidden;
+  }
+  #loginOverlay.hidden { display: none; }
+
+  /* Animated background orbs */
+  .lo-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .lo-orb {
+    position: absolute; border-radius: 50%;
+    filter: blur(80px); opacity: 0.22;
+    animation: loOrb 8s ease-in-out infinite;
+  }
+  .lo-orb-1 {
+    width: clamp(200px,40vw,500px); height: clamp(200px,40vw,500px);
+    background: radial-gradient(circle,#FF8608,#ff4500);
+    top: -10%; left: -10%; animation-delay: 0s;
+  }
+  .lo-orb-2 {
+    width: clamp(150px,30vw,400px); height: clamp(150px,30vw,400px);
+    background: radial-gradient(circle,#001078,#3182ce);
+    bottom: -10%; right: -10%; animation-delay: 4s;
+  }
+  .lo-orb-3 {
+    width: clamp(100px,20vw,250px); height: clamp(100px,20vw,250px);
+    background: radial-gradient(circle,#0e9f6e,#10b981);
+    top: 50%; left: 60%; animation-delay: 2s;
+  }
+  @keyframes loOrb {
+    0%,100%{ transform:translate(0,0) scale(1); }
+    33%    { transform:translate(30px,-20px) scale(1.05); }
+    66%    { transform:translate(-20px,15px) scale(0.97); }
+  }
+  .lo-grid {
+    position: absolute; inset: 0; opacity: 0.04;
+    background-image:
+      linear-gradient(rgba(255,134,8,.5) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,134,8,.5) 1px,transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Login card */
+  .lo-card {
+    position: relative; z-index: 1;
+    width: 100%; max-width: 420px;
+    background: rgba(20,20,20,0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,134,8,0.18);
+    border-radius: 20px;
+    padding: clamp(28px,6vw,44px) clamp(22px,5vw,40px);
+    box-shadow: 0 0 0 1px rgba(255,134,8,0.04), 0 20px 60px rgba(0,0,0,0.6), 0 0 80px rgba(255,134,8,0.07);
+    animation: loCardIn 0.5s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  @keyframes loCardIn {
+    from { opacity:0; transform:translateY(24px) scale(0.97); }
+    to   { opacity:1; transform:translateY(0) scale(1); }
+  }
+
+  /* Brand */
+  .lo-brand { text-align:center; margin-bottom:28px; }
+  .lo-logo {
+    width:60px; height:60px;
+    background:linear-gradient(135deg,#FF8608,#ff6b00);
+    border-radius:16px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; margin:0 auto 14px;
+    box-shadow:0 8px 24px rgba(255,134,8,0.4);
+  }
+  .lo-brand-name { font-size:clamp(1.3rem,4vw,1.6rem); font-weight:800; color:#fff; letter-spacing:-0.02em; }
+  .lo-brand-name span { color:#FF8608; }
+  .lo-brand-sub { font-size:0.72rem; color:rgba(255,255,255,0.35); margin-top:4px; letter-spacing:0.08em; text-transform:uppercase; }
+  .lo-form-title { font-size:0.95rem; font-weight:600; color:rgba(255,255,255,0.85); margin-bottom:18px; text-align:center; }
+
+  /* Form fields */
+  .lo-group { margin-bottom:14px; }
+  .lo-label { display:block; font-size:0.72rem; font-weight:700; color:rgba(255,255,255,0.45); margin-bottom:6px; letter-spacing:0.07em; text-transform:uppercase; }
+  .lo-input-wrap { position:relative; display:flex; align-items:center; }
+  .lo-icon { position:absolute; left:13px; font-size:15px; color:rgba(255,255,255,0.25); pointer-events:none; transition:color .2s; }
+  .lo-input {
+    width:100%; padding:11px 14px 11px 40px;
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.1);
+    border-radius:10px; color:#fff;
+    font-size:0.9rem; font-family:inherit; outline:none;
+    transition:all .2s; -webkit-appearance:none;
+  }
+  .lo-input::placeholder { color:rgba(255,255,255,0.2); }
+  .lo-input:focus { border-color:#FF8608; background:rgba(255,134,8,0.07); box-shadow:0 0 0 3px rgba(255,134,8,0.12); }
+  .lo-input-wrap:focus-within .lo-icon { color:#FF8608; }
+  .lo-pw-toggle {
+    position:absolute; right:12px;
+    background:none; border:none; color:rgba(255,255,255,0.28);
+    cursor:pointer; font-size:15px; padding:4px; line-height:1;
+    transition:color .2s;
+  }
+  .lo-pw-toggle:hover { color:#FF8608; }
+
+  /* Error */
+  .lo-error {
+    display:none;
+    background:rgba(229,62,62,0.15);
+    border:1px solid rgba(229,62,62,0.4);
+    border-radius:8px; padding:10px 14px;
+    color:#fc8181; font-size:0.82rem;
+    margin-bottom:14px; text-align:center;
+    animation:loShake .4s ease;
+  }
+  .lo-error.show { display:block; }
+  @keyframes loShake {
+    0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)}
+    40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)}
+  }
+
+  /* Submit button */
+  .lo-btn {
+    width:100%; padding:13px;
+    background:linear-gradient(135deg,#FF8608,#e67300);
+    color:#fff; border:none; border-radius:10px;
+    font-size:0.95rem; font-weight:700; cursor:pointer;
+    letter-spacing:0.04em; transition:all .2s;
+    font-family:inherit; margin-top:4px;
+  }
+  .lo-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 8px 24px rgba(255,134,8,0.4); }
+  .lo-btn:active:not(:disabled) { transform:translateY(0); }
+  .lo-btn:disabled { opacity:0.55; cursor:not-allowed; }
+  .lo-btn .lo-btn-text { display:inline; }
+  .lo-btn .lo-btn-spin { display:none; align-items:center; gap:8px; justify-content:center; }
+  .lo-btn.loading .lo-btn-text { display:none; }
+  .lo-btn.loading .lo-btn-spin { display:inline-flex; }
+  .lo-spin { width:16px; height:16px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:loSpinAnim .7s linear infinite; display:inline-block; }
+  @keyframes loSpinAnim { to{transform:rotate(360deg)} }
+
+  /* Role chips */
+  .lo-chips { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:18px; }
+  .lo-chip { padding:3px 10px; border-radius:20px; font-size:0.68rem; font-weight:600; letter-spacing:0.04em; border:1px solid rgba(255,255,255,0.1); color:rgba(255,255,255,0.3); background:rgba(255,255,255,0.04); }
+  .lo-footer { text-align:center; margin-top:20px; color:rgba(255,255,255,0.2); font-size:0.7rem; }
+  .lo-footer strong { color:rgba(255,255,255,0.35); }
+
+  /* ── AUTH GATE (loading spinner before login check) ───────── */
+  #authGate {
+    position:fixed; inset:0; background:#0f0f0f; z-index:99998;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+  }
+  #authGate.hidden { display:none; }
+  @keyframes authSpin { to{transform:rotate(360deg)} }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOGIN OVERLAY — shown when no valid session
+     Never uses document.write — google.script.run stays alive
+═══════════════════════════════════════════════════════════ -->
+<div id="loginOverlay" class="hidden">
+  <!-- Animated background -->
+  <div class="lo-bg">
+    <div class="lo-orb lo-orb-1"></div>
+    <div class="lo-orb lo-orb-2"></div>
+    <div class="lo-orb lo-orb-3"></div>
+    <div class="lo-grid"></div>
+  </div>
+
+  <!-- Login card -->
+  <div class="lo-card">
+    <div class="lo-brand">
+      <div class="lo-logo">🧵</div>
+      <div class="lo-brand-name">Inventory<span>Tracker</span></div>
+      <div class="lo-brand-sub">Fabric Management System</div>
+    </div>
+
+    <div class="lo-form-title">Sign in to your account</div>
+
+    <!-- Error message -->
+    <div class="lo-error" id="loginError"></div>
+
+    <!-- Username -->
+    <div class="lo-group">
+      <label class="lo-label" for="loginUsername">Username</label>
+      <div class="lo-input-wrap">
+        <span class="lo-icon">👤</span>
+        <input class="lo-input" type="text" id="loginUsername"
+          placeholder="Enter your username"
+          autocomplete="username" autocapitalize="none" spellcheck="false"/>
+      </div>
+    </div>
+
+    <!-- Password -->
+    <div class="lo-group">
+      <label class="lo-label" for="loginPassword">Password</label>
+      <div class="lo-input-wrap">
+        <span class="lo-icon">🔒</span>
+        <input class="lo-input" type="password" id="loginPassword"
+          placeholder="Enter your password"
+          autocomplete="current-password"/>
+        <button type="button" class="lo-pw-toggle" id="loPwToggle"
+          onclick="loTogglePw()" title="Show/hide password">👁️</button>
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <button class="lo-btn" id="loginBtn" onclick="handleLoginSubmit()">
+      <span class="lo-btn-text">Sign In →</span>
+      <span class="lo-btn-spin"><span class="lo-spin"></span> Signing in...</span>
+    </button>
+
+    <!-- Role chips (decorative) -->
+    <div class="lo-chips">
+      <span class="lo-chip">Admin</span>
+      <span class="lo-chip">Manager</span>
+      <span class="lo-chip">EntryOP</span>
+      <span class="lo-chip">User</span>
+      <span class="lo-chip">PC</span>
+    </div>
+
+    <div class="lo-footer">
+      <strong>Inventory Tracker</strong> &nbsp;·&nbsp; Fabric Management System<br/>
+      Contact your administrator if you cannot log in.
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     AUTH GATE — spinner shown while validating token on load
+═══════════════════════════════════════════════════════════ -->
+<div id="authGate">
+  <div style="width:56px;height:56px;background:linear-gradient(135deg,#FF8608,#e67300);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 8px 24px rgba(255,134,8,0.4);">🧵</div>
+  <div style="color:#fff;font-size:1.1rem;font-weight:700;font-family:'Segoe UI',sans-serif;">Inventory Tracker</div>
+  <div style="width:36px;height:36px;border:3px solid rgba(255,134,8,0.2);border-top-color:#FF8608;border-radius:50%;animation:authSpin 0.8s linear infinite;"></div>
+  <div style="color:rgba(255,255,255,0.4);font-size:0.8rem;font-family:'Segoe UI',sans-serif;">Verifying session...</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">🧵</div>
+    <div class="brand-text">
+      <div class="brand-name">Inventory Tracker</div>
+      <div class="brand-sub">Fabric Management</div>
+    </div>
+  </div>
+
+  <div class="sidebar-user" id="sidebarUser">
+    <div class="su-avatar" id="suAvatar">?</div>
+    <div class="su-info">
+      <div class="su-name" id="suName">Loading...</div>
+      <div class="su-role" id="suRole">—</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">MAIN</div>
+    <a class="nav-link active" data-page="dashboard" href="#">
+      <span class="nav-icon">📊</span> Dashboard
+    </a>
+
+    <div class="nav-section-label">PROCUREMENT</div>
+    <a class="nav-link" data-page="purchase-orders" href="#">
+      <span class="nav-icon">📋</span> Purchase Orders
+    </a>
+    <a class="nav-link" data-page="fabric-receiving" href="#">
+      <span class="nav-icon">📦</span> Fabric Receiving
+    </a>
+
+    <div class="nav-section-label">INVENTORY</div>
+    <a class="nav-link" data-page="inventory" href="#">
+      <span class="nav-icon">🗃️</span> Inventory Master
+    </a>
+    <a class="nav-link" data-page="stock-issue" href="#">
+      <span class="nav-icon">⬆️</span> Stock Issue
+    </a>
+    <a class="nav-link" data-page="stock-returns" href="#">
+      <span class="nav-icon">↩️</span> Stock Returns
+    </a>
+
+    <div class="nav-section-label">MASTER DATA</div>
+    <a class="nav-link" data-page="vendors" href="#">
+      <span class="nav-icon">🏭</span> Vendors
+    </a>
+    <a class="nav-link" data-page="production-orders" href="#">
+      <span class="nav-icon">🤖</span> Production Orders
+    </a>
+
+    <div class="nav-section-label">REPORTS</div>
+    <a class="nav-link" data-page="reports" href="#">
+      <span class="nav-icon">📈</span> Reports & Analytics
+    </a>
+    <a class="nav-link" data-page="stock-ledger" href="#">
+      <span class="nav-icon">📒</span> Stock Ledger
+    </a>
+    <a class="nav-link" data-page="activity-logs" href="#">
+      <span class="nav-icon">🔍</span> Activity Logs
+    </a>
+
+    <div class="nav-section-label">ACCOUNT</div>
+    <a class="nav-link" data-page="change-password" href="#">
+      <span class="nav-icon">🔑</span> Change Password
+    </a>
+
+    <!-- Admin-only section — shown by JS after role confirmed -->
+    <div id="adminNavSection" style="display:none">
+      <div class="nav-section-label">ADMINISTRATION</div>
+      <a class="nav-link" data-page="user-management" href="#">
+        <span class="nav-icon">👥</span> User Management
+      </a>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <button class="btn btn-sm btn-outline" onclick="runSetup()" style="background: #093D00!important;color: #C9FFE9!important;padding:5px 10px" title="Initialize or repair database sheets">
+      💾 Initialize DB
+    </button>
+    <button onclick="handleLogout()" style="background:#A60303;color:#FFFAE8;border:1px solid rgba(229,62,62,0.3);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;font-family:inherit;transition:all .2s;" onmouseover="this.style.background='var(--accent-red)'"onmouseout="this.style.background='#A60303'">
+      ⏻ Logout
+    </button>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════════════════════════
+     MAIN CONTENT
+═══════════════════════════════════════════════════════════ -->
+<div class="main-wrapper" id="mainWrapper">
+  <header class="topbar">
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
+    <div class="topbar-search">
+      <input type="text" id="globalSearch" placeholder="Search articles, fabrics, vendors..." oninput="handleSearch(this.value)" autocomplete="off"/>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <div class="topbar-right">
+      <span class="low-stock-badge" id="lowStockBadge" style="display:none" onclick="showPage('inventory')" title="Low stock items" role="button"></span>
+      <span class="topbar-date" id="topbarDate"></span>
+      <div class="topbar-user">
+        <span class="tu-avatar" id="tuAvatar">?</span>
+        <span class="tu-name"   id="tuName">—</span>
+        <span class="tu-role badge badge-warning" id="tuRole">—</span>
+      </div>
+      <!-- <button onclick="handleLogout()" style="background:#A60303;color:#FFFAE8;border:1px solid rgba(229,62,62,0.3);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;font-family:inherit;white-space:nowrap;">
+        ⏻ Logout -->
+      </button>
+    </div>
+  </header>
+  <main class="page-content" id="pageContent">
+    <?!= include('dashboard'); ?>
+  </main>
+</div>
+
+<!-- Toast / Modal / Loading -->
+<div class="toast-container" id="toastContainer"></div>
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Modal</h3>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Loading...</div>
+</div>
+
+<?!= include('scripts'); ?>
+
+<script>
+// ============================================================
+// AUTH SYSTEM — embedded in index.html
+// No document.write. No page reload. google.script.run always live.
+// Flow:
+//   Page loads → authGate spinner shown
+//   → check localStorage for session token
+//   → if none: hide authGate, show loginOverlay
+//   → if token: validate with server
+//       valid   → hide authGate, show ERP, initApp()
+//       invalid → hide authGate, show loginOverlay
+// ============================================================
+
+// ── BOOT ─────────────────────────────────────────────────────
+(function bootSession() {
+  const raw = localStorage.getItem('erp_session');
+  if (!raw) { showLoginOverlay(); return; }
+
+  let session;
+  try { session = JSON.parse(raw); } catch(e) { showLoginOverlay(); return; }
+  if (!session || !session.token) { showLoginOverlay(); return; }
+
+  // Validate token with server
+  google.script.run
+    .withSuccessHandler(function(res) {
+      try {
+        const r = typeof res === 'string' ? JSON.parse(res) : res;
+        if (r.success) {
+          // Refresh role/displayName from server (catches mid-session changes)
+          session.role        = r.data.role;
+          session.displayName = r.data.displayName;
+          localStorage.setItem('erp_session', JSON.stringify(session));
+          window.__session = session;
+          bootERP(session);
+        } else {
+          localStorage.removeItem('erp_session');
+          showLoginOverlay();
+        }
+      } catch(e) { showLoginOverlay(); }
+    })
+    .withFailureHandler(function() {
+      // Network error — gracefully allow (server rejects bad tokens on next call)
+      window.__session = session;
+      bootERP(session);
+    })
+    .dispatch('validateToken', JSON.stringify({ token: session.token }));
+})();
+
+// ── BOOT ERP SHELL ───────────────────────────────────────────
+function bootERP(session) {
+  renderUserUI(session);
+  if (session.role === 'Admin') {
+    const s = document.getElementById('adminNavSection');
+    if (s) s.style.display = 'block';
+  }
+  hideAuthGate();
+  initApp();
+}
+
+// ── SHOW / HIDE AUTH GATE ────────────────────────────────────
+function hideAuthGate() {
+  const gate = document.getElementById('authGate');
+  if (!gate) return;
+  gate.style.opacity    = '0';
+  gate.style.transition = 'opacity 0.3s ease';
+  setTimeout(() => gate.classList.add('hidden'), 320);
+}
+
+// ── SHOW LOGIN OVERLAY ───────────────────────────────────────
+function showLoginOverlay() {
+  document.getElementById('authGate').classList.add('hidden');
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  // Focus username field
+  setTimeout(() => {
+    const u = document.getElementById('loginUsername');
+    if (u) u.focus();
+  }, 100);
+}
+
+// ── HIDE LOGIN OVERLAY (after successful login) ──────────────
+function hideLoginOverlay() {
+  const lo = document.getElementById('loginOverlay');
+  lo.style.opacity    = '0';
+  lo.style.transition = 'opacity 0.4s ease';
+  setTimeout(() => lo.classList.add('hidden'), 420);
+}
+
+// ── LOGIN FORM HELPERS ───────────────────────────────────────
+function loTogglePw() {
+  const pw  = document.getElementById('loginPassword');
+  const btn = document.getElementById('loPwToggle');
+  if (pw.type === 'password') { pw.type = 'text';     btn.textContent = '🙈'; }
+  else                        { pw.type = 'password'; btn.textContent = '👁️'; }
+}
+
+function loShowError(msg) {
+  const el = document.getElementById('loginError');
+  el.textContent = msg;
+  el.classList.add('show');
+  // Re-trigger shake animation
+  el.style.animation = 'none';
+  el.offsetHeight; // reflow
+  el.style.animation = '';
+}
+
+function loHideError() {
+  document.getElementById('loginError').classList.remove('show');
+}
+
+function loSetLoading(on) {
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = on;
+  btn.classList.toggle('loading', on);
+}
+
+// ── LOGIN SUBMIT ─────────────────────────────────────────────
+function handleLoginSubmit() {
+  loHideError();
+  const username = (document.getElementById('loginUsername').value || '').trim();
+  const password = (document.getElementById('loginPassword').value || '').trim();
+
+  if (!username || !password) {
+    loShowError('Please enter both username and password.');
+    return;
+  }
+
+  loSetLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(raw) {
+      try {
+        const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (res.success) {
+          // Store session
+          const session = {
+            token      : res.data.token,
+            username   : res.data.username,
+            displayName: res.data.displayName,
+            role       : res.data.role,
+            loginTime  : new Date().toISOString()
+          };
+          localStorage.setItem('erp_session', JSON.stringify(session));
+          window.__session = session;
+
+          loSetLoading(false);
+          hideLoginOverlay();
+
+          // Boot ERP without any page reload
+          bootERP(session);
+
+        } else {
+          loSetLoading(false);
+          loShowError(res.error || 'Invalid username or password.');
+        }
+      } catch(e) {
+        loSetLoading(false);
+        loShowError('Unexpected response. Please try again.');
+      }
+    })
+    .withFailureHandler(function(err) {
+      loSetLoading(false);
+      loShowError('Server error: ' + (err && err.message ? err.message : 'Please try again.'));
+    })
+    .dispatch('login', JSON.stringify({ username: username, password: password }));
+}
+
+// Allow Enter key to submit
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const lo = document.getElementById('loginOverlay');
+    if (lo && !lo.classList.contains('hidden')) {
+      handleLoginSubmit();
+    }
+  }
+});
+
+// ── RENDER USER UI ───────────────────────────────────────────
+function renderUserUI(session) {
+  if (!session) return;
+  const initial = (session.displayName || session.username || '?')[0].toUpperCase();
+  const roleColors = { Admin:'#FF8608', Manager:'#0e9f6e', EntryOP:'#3182ce', User:'#9f7aea', PC:'#e53e3e' };
+  const color = roleColors[session.role] || '#718096';
+
+  const av = document.getElementById('suAvatar');
+  const nm = document.getElementById('suName');
+  const rl = document.getElementById('suRole');
+  if (av) { av.textContent = initial; av.style.background = color; }
+  if (nm)   nm.textContent = session.displayName || session.username;
+  if (rl)   rl.textContent = session.role;
+
+  const tuAv = document.getElementById('tuAvatar');
+  const tuNm = document.getElementById('tuName');
+  const tuRl = document.getElementById('tuRole');
+  if (tuAv) { tuAv.textContent = initial; tuAv.style.background = color; }
+  if (tuNm)   tuNm.textContent = session.displayName || session.username;
+  if (tuRl)   tuRl.textContent = session.role;
+}
+
+// ── LOGOUT ───────────────────────────────────────────────────
+function handleLogout() {
+  if (!confirm('Sign out of Inventory ERP?')) return;
+  showLoading('Signing out...');
+  const session = window.__session || {};
+  google.script.run
+    .withSuccessHandler(function() {
+      localStorage.removeItem('erp_session');
+      window.__session = null;
+      hideLoading();
+      // Clear UI and show login
+      document.getElementById('pageContent').innerHTML = '';
+      document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+      document.getElementById('adminNavSection').style.display = 'none';
+      // Reset user UI
+      ['suAvatar','tuAvatar'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='?';});
+      ['suName','tuName'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='—';});
+      ['suRole','tuRole'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='—';});
+      // Show login overlay
+      const lo = document.getElementById('loginOverlay');
+      lo.style.opacity = '1';
+      lo.classList.remove('hidden');
+      document.getElementById('loginUsername').value = '';
+      document.getElementById('loginPassword').value = '';
+      loHideError();
+      setTimeout(() => document.getElementById('loginUsername').focus(), 100);
+    })
+    .withFailureHandler(function() {
+      localStorage.removeItem('erp_session');
+      window.__session = null;
+      hideLoading();
+      location.reload();
+    })
+    .dispatch('logout', JSON.stringify({ _token: session.token }));
+}
+</script>
+</body>
+</html>

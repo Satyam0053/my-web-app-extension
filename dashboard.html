@@ -1,0 +1,277 @@
+<!-- dashboard.html — loaded as default page -->
+<!-- dashboard.html — loaded as default page -->
+<div id="page-dashboard">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">📊 Dashboard</div>
+      <div class="page-sub" id="dashboardLastUpdated">Loading...</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadDashboard()">♻️ Refresh</button>
+      <button class="btn btn-primary btn-sm" onclick="showCreatePOModal()">➕ Create PO</button>
+    </div>
+  </div>
+
+  <!-- KPI STATS -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card blue">
+      <div class="stat-icon">🗃️</div>
+      <div class="stat-value" id="statTotalItems">—</div>
+      <div class="stat-label">Inventory Items</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-icon">📦</div>
+      <div class="stat-value" id="statTotalStock">—</div>
+      <div class="stat-label">Total Stock (Mtrs)</div>
+    </div>
+    <div class="stat-card orange">
+      <div class="stat-icon">⬆️</div>
+      <div class="stat-value" id="statTodayIssue">—</div>
+      <div class="stat-label">Today's Issues</div>
+    </div>
+    <div class="stat-card red">
+      <div class="stat-icon">⚠️</div>
+      <div class="stat-value" id="statLowStock">—</div>
+      <div class="stat-label">Low Stock Alerts</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-icon">📋</div>
+      <div class="stat-value" id="statPendingPOs">—</div>
+      <div class="stat-label">Pending POs</div>
+    </div>
+    <div class="stat-card teal">
+      <div class="stat-icon">📈</div>
+      <div class="stat-value" id="statMonthIssue">—</div>
+      <div class="stat-label">Monthly Issued (Mtrs)</div>
+    </div>
+    <!-- NEW: Total Order Qty -->
+    <div class="stat-card dgreen" >
+      <div class="stat-icon">🛒</div>
+      <div class="stat-value" id="statTotalOrderQty">—</div>
+      <div class="stat-label">Total Order Qty (Mtrs)</div>
+    </div>
+    <!-- NEW: Total Pending Qty -->
+    <div class="stat-card dpink" >
+      <div class="stat-icon">⏳</div>
+      <div class="stat-value" id="statTotalPendingQty">—</div>
+      <div class="stat-label">Total Pending Qty (Mtrs)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="grid-2 mb-2" style="gap:20px">
+
+    <!-- Daily Trend -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📅 Daily Issue Trend (7 Days)</span>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap">
+          <canvas id="dailyTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Trend -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📆 Monthly Consumption (6 Months)</span>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap">
+          <canvas id="monthlyTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM ROW -->
+  <div class="grid-3 mb-2" style="gap:20px">
+
+    <!-- Top Articles -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">🏷️ Top Consumed Articles</span>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="topArticlesList"><div class="table-empty">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- Top Vendors -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">🏭 Top Vendors (by Inward)</span>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="topVendorsList"><div class="table-empty">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- Low Stock Alerts -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" style="color:var(--danger)">⚠️ Low Stock Alerts</span>
+        <button class="btn btn-xs btn-outline" onclick="showPage('inventory')">View All</button>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div id="lowStockList"><div class="table-empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLOR CHART -->
+  <div class="card mb-2">
+    <div class="card-header">
+      <span class="card-title">🎨 Color-wise Consumption</span>
+    </div>
+    <div class="card-body">
+      <div class="chart-canvas-wrap" style="height:180px">
+        <canvas id="colorChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW: VENDOR-WISE PENDING QTY -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">⏳ Vendor-wise Pending Qty (Mtrs)</span>
+      <button class="btn btn-xs btn-outline" onclick="showPage('purchase-orders')">View POs</button>
+    </div>
+    <div class="card-body">
+      <!-- Bar Chart -->
+      <div class="chart-canvas-wrap" style="height:240px">
+        <canvas id="vendorPendingChart"></canvas>
+      </div>
+      <!-- Table -->
+      <div style="margin-top:16px;overflow-x:auto">
+        <table class="table" id="vendorPendingTable" style="font-size:.85rem">
+          <thead>
+            <tr>
+              <th>S.No.</th>
+              <th>Vendor Name</th>
+              <th style="text-align:right">Pending Qty (Mtrs)</th>
+              <th style="text-align:right">% of Total</th>
+            </tr>
+          </thead>
+          <tbody id="vendorPendingTableBody">
+            <tr><td colspan="4" class="table-empty">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Chart.js CDN loaded in scripts.html
+function renderDashboard(data) {
+  const s = data.stats;
+  document.getElementById('statTotalItems').textContent     = s.totalItems;
+  document.getElementById('statTotalStock').textContent     = fmtNum(s.totalStock);
+  document.getElementById('statTodayIssue').textContent     = fmtNum(s.todayIssuedQty);
+  document.getElementById('statLowStock').textContent       = s.lowStockCount;
+  document.getElementById('statPendingPOs').textContent     = s.pendingPOs;
+  document.getElementById('statMonthIssue').textContent     = fmtNum(s.monthIssuedQty);
+  document.getElementById('statTotalOrderQty').textContent  = fmtNum(s.totalOrderQty   || 0);
+  document.getElementById('statTotalPendingQty').textContent= fmtNum(s.totalPendingQty || 0);
+  document.getElementById('dashboardLastUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+
+  // Low stock badge
+  if (s.lowStockCount > 0) {
+    const badge = document.getElementById('lowStockBadge');
+    if (badge) { badge.textContent = s.lowStockCount + ' Low Stock'; badge.style.display = 'inline-block'; }
+  }
+
+  // Daily trend chart
+  renderBarChart('dailyTrendChart', data.dailyTrend.map(d=>d.date), data.dailyTrend.map(d=>d.qty), '#1a3c5e', 'Qty Issued');
+  // Monthly chart
+  renderBarChart('monthlyTrendChart', data.monthlyTrend.map(d=>d.month), data.monthlyTrend.map(d=>d.qty), '#0e9f6e', 'Monthly Issued');
+  // Color chart
+  renderBarChart('colorChart', data.colorData.map(d=>d.color), data.colorData.map(d=>d.qty), '#3182ce', 'Qty', true);
+
+  // Top articles list
+  document.getElementById('topArticlesList').innerHTML = data.topArticles.length ?
+    data.topArticles.map((a,i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--primary);color:#fff;font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center">${i+1}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.83rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.name || '—'}</div>
+        </div>
+        <span class="badge badge-info">${fmtNum(a.qty)} m</span>
+      </div>`).join('') : '<div class="table-empty">No data</div>';
+
+  // Top vendors list
+  document.getElementById('topVendorsList').innerHTML = data.topVendors.length ?
+    data.topVendors.map((v,i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center">${i+1}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.83rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.name}</div>
+        </div>
+        <span class="badge badge-success">${fmtNum(v.qty)} m</span>
+      </div>`).join('') : '<div class="table-empty">No data</div>';
+
+  // Low stock list
+  document.getElementById('lowStockList').innerHTML = data.lowStockItems.length ?
+    data.lowStockItems.map(i => `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <span>⚠️</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.83rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.Article_Number||''} ${i.Fabric_Name} - ${i.Color}</div>
+          <div class="stock-bar-wrap"><div class="stock-bar low" style="width:${Math.min(100, Math.round((i.Current_Stock/Math.max(i.Reorder_Level,1))*100))}%"></div></div>
+        </div>
+        <span class="badge badge-danger">${fmtNum(i.Current_Stock)}</span>
+      </div>`).join('') : '<div class="table-empty" style="color:var(--success);font-style:normal">✅ All stock levels OK</div>';
+
+  // ── Vendor Pending Qty Chart + Table ────────────────────────
+  const vpData = data.vendorPendingQty || [];
+  if (vpData.length) {
+    const vpLabels = vpData.map(v => v.vendor);
+    const vpValues = vpData.map(v => v.qty);
+    const totalPending = vpValues.reduce((a, b) => a + b, 0);
+
+    renderBarChart('vendorPendingChart', vpLabels, vpValues, '#e11d48', 'Pending Qty (Mtrs)');
+
+    document.getElementById('vendorPendingTableBody').innerHTML = vpData.map((v, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td><strong>${v.vendor}</strong></td>
+        <td style="text-align:right"><span class="badge badge-danger">${fmtNum(v.qty)}</span></td>
+        <td style="text-align:right;color:var(--text-muted);font-size:.8rem">
+          ${totalPending > 0 ? (v.qty / totalPending * 100).toFixed(1) + '%' : '—'}
+        </td>
+      </tr>`).join('');
+  } else {
+    if (chartInstances['vendorPendingChart']) { chartInstances['vendorPendingChart'].destroy(); }
+    document.getElementById('vendorPendingTableBody').innerHTML =
+      '<tr><td colspan="4" class="table-empty" style="color:var(--success);font-style:normal">✅ No pending quantities</td></tr>';
+  }
+}
+
+let chartInstances = {};
+function renderBarChart(canvasId, labels, values, color, label, horizontal) {
+  if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || typeof Chart === 'undefined') return;
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label, data: values, backgroundColor: color + 'cc', borderColor: color, borderWidth: 1, borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: horizontal ? 'y' : 'x',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: !horizontal }, ticks: { font: { size: 10 } } },
+        y: { grid: { display: horizontal }, ticks: { font: { size: 10 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+</script>

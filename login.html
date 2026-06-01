@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inventory ERP — Login</title>
+  <style>
+    /* ── RESET & BASE ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 14px; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f0f0f;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── ANIMATED BACKGROUND ─────────────────────────────── */
+    .bg-canvas {
+      position: fixed; inset: 0; z-index: 0;
+      background: linear-gradient(135deg, #0f0f0f 0%, #1a0a00 40%, #0a0a1a 100%);
+    }
+    .bg-orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(80px); opacity: 0.25; animation: orbFloat 8s ease-in-out infinite;
+    }
+    .bg-orb-1 {
+      width: clamp(200px, 40vw, 500px); height: clamp(200px, 40vw, 500px);
+      background: radial-gradient(circle, #FF8608, #ff4500);
+      top: -10%; left: -10%;
+      animation-delay: 0s;
+    }
+    .bg-orb-2 {
+      width: clamp(150px, 30vw, 400px); height: clamp(150px, 30vw, 400px);
+      background: radial-gradient(circle, #001078, #3182ce);
+      bottom: -10%; right: -10%;
+      animation-delay: 4s;
+    }
+    .bg-orb-3 {
+      width: clamp(100px, 20vw, 250px); height: clamp(100px, 20vw, 250px);
+      background: radial-gradient(circle, #0e9f6e, #10b981);
+      top: 50%; left: 60%;
+      animation-delay: 2s;
+    }
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33%       { transform: translate(30px, -20px) scale(1.05); }
+      66%       { transform: translate(-20px, 15px) scale(0.97); }
+    }
+
+    /* ── GRID OVERLAY ────────────────────────────────────── */
+    .bg-grid {
+      position: fixed; inset: 0; z-index: 0; opacity: 0.04;
+      background-image:
+        linear-gradient(rgba(255,134,8,0.5) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,134,8,0.5) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* ── LOGIN CARD ───────────────────────────────────────── */
+    .login-wrapper {
+      position: relative; z-index: 10;
+      width: 100%; max-width: 420px;
+      padding: clamp(12px, 4vw, 24px);
+    }
+
+    .login-card {
+      background: rgba(20, 20, 20, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 134, 8, 0.2);
+      border-radius: 20px;
+      padding: clamp(28px, 6vw, 44px) clamp(24px, 5vw, 40px);
+      box-shadow:
+        0 0 0 1px rgba(255,134,8,0.05),
+        0 20px 60px rgba(0,0,0,0.6),
+        0 0 80px rgba(255,134,8,0.08);
+      animation: cardIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(24px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── BRAND ───────────────────────────────────────────── */
+    .brand {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .brand-logo {
+      width: 64px; height: 64px;
+      background: linear-gradient(135deg, #FF8608, #ff6b00);
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+      margin: 0 auto 16px;
+      box-shadow: 0 8px 24px rgba(255,134,8,0.4);
+    }
+    .brand-name {
+      font-size: clamp(1.3rem, 4vw, 1.6rem);
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+    }
+    .brand-name span { color: #FF8608; }
+    .brand-sub {
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.4);
+      margin-top: 4px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* ── FORM ─────────────────────────────────────────────── */
+    .form-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .form-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 6px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-icon {
+      position: absolute; left: 14px;
+      font-size: 16px; color: rgba(255,255,255,0.3);
+      pointer-events: none;
+      transition: color 0.2s;
+    }
+    .form-control {
+      width: 100%;
+      padding: 12px 14px 12px 42px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.2s ease;
+      -webkit-appearance: none;
+    }
+    .form-control::placeholder { color: rgba(255,255,255,0.2); }
+    .form-control:focus {
+      border-color: #FF8608;
+      background: rgba(255,134,8,0.06);
+      box-shadow: 0 0 0 3px rgba(255,134,8,0.12);
+    }
+    .form-control:focus + .input-icon,
+    .input-wrap:focus-within .input-icon { color: #FF8608; }
+
+    /* Password toggle */
+    .pw-toggle {
+      position: absolute; right: 14px;
+      background: none; border: none;
+      color: rgba(255,255,255,0.3);
+      cursor: pointer; font-size: 16px;
+      padding: 4px;
+      transition: color 0.2s;
+      line-height: 1;
+    }
+    .pw-toggle:hover { color: #FF8608; }
+
+    /* ── ERROR MESSAGE ────────────────────────────────────── */
+    .error-msg {
+      display: none;
+      background: rgba(229, 62, 62, 0.15);
+      border: 1px solid rgba(229, 62, 62, 0.4);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #fc8181;
+      font-size: 0.82rem;
+      margin-bottom: 16px;
+      text-align: center;
+      animation: shake 0.4s ease;
+    }
+    .error-msg.show { display: block; }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%       { transform: translateX(-6px); }
+      40%       { transform: translateX(6px); }
+      60%       { transform: translateX(-4px); }
+      80%       { transform: translateX(4px); }
+    }
+
+    /* ── LOGIN BUTTON ─────────────────────────────────────── */
+    .btn-login {
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, #FF8608, #e67300);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+      margin-top: 4px;
+      font-family: inherit;
+    }
+    .btn-login:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(255,134,8,0.4);
+      background: linear-gradient(135deg, #ff9520, #FF8608);
+    }
+    .btn-login:active:not(:disabled) { transform: translateY(0); }
+    .btn-login:disabled {
+      opacity: 0.6; cursor: not-allowed;
+    }
+    .btn-login .btn-text { transition: opacity 0.2s; }
+    .btn-login .btn-spinner { display: none; }
+    .btn-login.loading .btn-text { display: none; }
+    .btn-login.loading .btn-spinner { display: inline-flex; align-items: center; gap: 8px; }
+    .spin-ring {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── FOOTER ──────────────────────────────────────────── */
+    .login-footer {
+      text-align: center;
+      margin-top: 24px;
+      color: rgba(255,255,255,0.25);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+    }
+    .login-footer strong { color: rgba(255,255,255,0.4); }
+
+    /* ── ROLE BADGES (decorative) ────────────────────────── */
+    .role-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .role-chip {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.35);
+      background: rgba(255,255,255,0.04);
+    }
+
+    /* ── RESPONSIVE ──────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .login-card { padding: 28px 20px; border-radius: 16px; }
+      .brand-logo { width: 52px; height: 52px; font-size: 26px; }
+    }
+    @media (max-height: 600px) {
+      body { align-items: flex-start; padding: 20px 0; }
+      .brand { margin-bottom: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Animated background -->
+<div class="bg-canvas">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+</div>
+<div class="bg-grid"></div>
+
+<!-- Login card -->
+<div class="login-wrapper">
+  <div class="login-card">
+
+    <!-- Brand -->
+    <div class="brand">
+      <div class="brand-logo">🧵</div>
+      <div class="brand-name">Inventory<span>ERP</span></div>
+      <div class="brand-sub">Flow Management System</div>
+    </div>
+
+    <div class="form-title">Sign in to your account</div>
+
+    <!-- FIX: Single error div only (removed duplicate #loginError that had
+         pre-filled text "Invalid username or password." visible on page load) -->
+    <div class="error-msg" id="loginError"></div>
+
+    <!-- Form -->
+    <form id="loginForm" onsubmit="handleLogin(event)">
+
+      <div class="form-group">
+        <label class="form-label" for="loginUsername">Username</label>
+        <div class="input-wrap">
+          <input
+            class="form-control"
+            type="text"
+            id="loginUsername"
+            name="username"
+            placeholder="Enter your username"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+          />
+          <span class="input-icon">👤</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="loginPassword">Password</label>
+        <div class="input-wrap">
+          <input
+            class="form-control"
+            type="password"
+            id="loginPassword"
+            name="password"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+            required
+          />
+          <span class="input-icon">🔒</span>
+          <button type="button" class="pw-toggle" id="pwToggle" onclick="togglePassword()" title="Show/Hide password">
+            👁️
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-login" id="loginBtn">
+        <span class="btn-text">Sign In →</span>
+        <span class="btn-spinner">
+          <span class="spin-ring"></span> Signing in...
+        </span>
+      </button>
+
+    </form>
+
+    <!-- Role chips — decorative -->
+    <div class="role-chips">
+      <span class="role-chip">Admin</span>
+      <span class="role-chip">Manager</span>
+      <span class="role-chip">EntryOP</span>
+      <span class="role-chip">User</span>
+      <span class="role-chip">PC</span>
+    </div>
+
+    <div class="login-footer">
+      <strong>Inventory ERP</strong> &nbsp;·&nbsp; Flow Management System<br/>
+      Contact your administrator if you cannot log in.
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ── PASSWORD TOGGLE ──────────────────────────────────────
+  function togglePassword() {
+    const pw  = document.getElementById('loginPassword');
+    const btn = document.getElementById('pwToggle');
+    if (pw.type === 'password') { pw.type = 'text';     btn.textContent = '🙈'; }
+    else                        { pw.type = 'password'; btn.textContent = '👁️'; }
+  }
+
+  // ── SHOW / HIDE ERROR ────────────────────────────────────
+  function showError(msg) {
+    const el = document.getElementById('loginError');
+    el.textContent = msg;
+    el.classList.add('show');
+  }
+  function hideError() {
+    const el = document.getElementById('loginError');
+    el.textContent = '';
+    el.classList.remove('show');
+  }
+
+  // ── SET BUTTON LOADING STATE ─────────────────────────────
+  function setLoading(loading) {
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = loading;
+    btn.classList.toggle('loading', loading);
+  }
+
+  // ── SAFE SESSION STORAGE ─────────────────────────────────
+  // Google Apps Script runs in a sandboxed iframe. localStorage is
+  // blocked in some browsers (Safari ITP, Firefox strict mode).
+  // We use a fallback to sessionStorage, then a plain JS variable.
+  var _sessionFallback = null;
+
+  function saveSession(data) {
+    var str = JSON.stringify(data);
+    try { localStorage.setItem('erp_session', str); return; } catch(e) {}
+    try { sessionStorage.setItem('erp_session', str); return; } catch(e) {}
+    _sessionFallback = str;
+  }
+
+  // ── HANDLE LOGIN SUBMIT ──────────────────────────────────
+  function handleLogin(e) {
+    e.preventDefault();
+    hideError();
+
+    // FIX: trim username (safe — no intentional spaces in usernames)
+    // FIX: do NOT trim password — must match exactly what was hashed
+    //      at account creation time. The backend also does NOT trim.
+    var username = document.getElementById('loginUsername').value.trim();
+    var password = document.getElementById('loginPassword').value; // ← no .trim()
+
+    if (!username || !password) {
+      showError('Please enter both username and password.');
+      return;
+    }
+
+    setLoading(true);
+
+    google.script.run
+      .withSuccessHandler(function(raw) {
+        setLoading(false);
+        try {
+          var res = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+
+          if (!res || typeof res !== 'object') {
+            showError('Unexpected server response. Please try again.');
+            return;
+          }
+
+          if (res.success) {
+            // ── STORE SESSION ────────────────────────────────
+            var session = {
+              token      : res.data.token,
+              username   : res.data.username,
+              displayName: res.data.displayName,
+              role       : res.data.role,
+              loginTime  : new Date().toISOString()
+            };
+            saveSession(session);
+
+            // ── REDIRECT TO MAIN APP ─────────────────────────
+            // Strip query params so the app reloads cleanly and
+            // picks up the new session on init.
+            try {
+              var baseUrl = window.top.location.href.split('?')[0];
+              window.top.location.replace(baseUrl);
+            } catch(navErr) {
+              // If top-frame navigation is blocked (rare), try same-frame
+              window.location.replace(window.location.href.split('?')[0]);
+            }
+
+          } else {
+            // Show the exact error message from the server
+            showError(res.error || 'Invalid username or password.');
+          }
+
+        } catch(parseErr) {
+          // Raw response was not valid JSON
+          showError('Unexpected error. Please try again. (' + parseErr.message + ')');
+        }
+      })
+      .withFailureHandler(function(err) {
+        setLoading(false);
+        // withFailureHandler fires when the Apps Script server throws
+        // an unhandled exception (not when it returns an error JSON).
+        showError('Connection error: ' + (err.message || 'Please try again.'));
+      })
+      .dispatch('login', JSON.stringify({ username: username, password: password }));
+  }
+
+  // ── AUTO-FOCUS USERNAME FIELD ────────────────────────────
+  window.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('loginUsername').focus();
+  });
+
+  // ── ENTER KEY ON PASSWORD FIELD ──────────────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      var active = document.activeElement;
+      if (active && active.id === 'loginPassword') {
+        document.getElementById('loginForm').dispatchEvent(
+          new Event('submit', { cancelable: true, bubbles: true })
+        );
+      }
+    }
+  });
+</script>
+</body>
+</html>

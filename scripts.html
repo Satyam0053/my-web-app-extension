@@ -1,0 +1,1502 @@
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ============================================================
+// INVENTORY ERP — FRONTEND CONTROLLER v2.1
+// ============================================================
+
+// ── APP STATE ────────────────────────────────────────────────
+const state = {
+  currentPage     : 'dashboard',
+  inventory       : [],
+  vendors         : [],
+  productionOrders: [],
+  issues          : [],
+  pos             : [],
+  returns         : [],
+  pendingPOs      : [],
+};
+
+// ── SESSION HELPERS ──────────────────────────────────────────
+function getSession() {
+  try { return JSON.parse(localStorage.getItem('erp_session') || '{}'); }
+  catch(e) { return {}; }
+}
+function getToken() { return getSession().token || ''; }
+function getRole()  { return getSession().role  || ''; }
+
+// ── INIT ─────────────────────────────────────────────────────
+// Called by index.html after session is validated.
+function initApp() {
+  document.getElementById('topbarDate').textContent =
+    new Date().toLocaleDateString('en-IN', {
+      weekday:'short', day:'numeric', month:'short', year:'numeric'
+    });
+  setupNavigation();
+  loadDashboard();
+}
+
+// ── NAVIGATION ───────────────────────────────────────────────
+function setupNavigation() {
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      showPage(link.dataset.page);
+    });
+  });
+}
+
+async function showPage(page) {
+  state.currentPage = page;
+  document.querySelectorAll('.nav-link').forEach(l =>
+    l.classList.toggle('active', l.dataset.page === page)
+  );
+  showLoading('Loading...');
+  try {
+    switch (page) {
+      case 'dashboard'        : await loadDashboard();         break;
+      case 'purchase-orders'  : await loadPurchaseOrders();    break;
+      case 'fabric-receiving' : await loadFabricReceiving();   break;
+      case 'inventory'        : await loadInventory();         break;
+      case 'stock-issue'      : await loadStockIssue();        break;
+      case 'stock-returns'    : await loadStockReturns();      break;
+      case 'vendors'          : await loadVendors();           break;
+      case 'production-orders': await loadProductionOrders();  break;
+      case 'reports'          : await loadReports();           break;
+      case 'stock-ledger'     : await loadStockLedger();       break;
+      case 'activity-logs'    : await loadActivityLogs();      break;
+      case 'change-password'  :       loadChangePassword();    break;
+      case 'user-management'  : await loadUserManagement();    break;
+      default: break;
+    }
+  } catch(e) {
+    toast('Page error: ' + e.message, 'error');
+  } finally {
+    hideLoading();
+  }
+  closeMobileSidebar();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── API CALL ─────────────────────────────────────────────────
+// Auto-injects _token. Handles AUTH_FAILED globally.
+function callAPI(action, payload) {
+  return new Promise((resolve, reject) => {
+    const p = Object.assign({}, payload || {});
+    p._token = getToken();
+    google.script.run
+      .withSuccessHandler(res => {
+        try {
+          const r = typeof res === 'string' ? JSON.parse(res) : res;
+          if (!r.success && (r.error === 'AUTH_FAILED' || r.error === 'AUTH_REQUIRED')) {
+            localStorage.removeItem('erp_session');
+            toast('Session expired. Redirecting to login...', 'warning', 2500);
+            setTimeout(() => {
+              if (typeof redirectToLogin === 'function') redirectToLogin();
+            }, 2500);
+            resolve(r); return;
+          }
+          resolve(r);
+        } catch(e) { reject(new Error('Invalid server response')); }
+      })
+      .withFailureHandler(err => reject(err))
+      .dispatch(action, JSON.stringify(p));
+  });
+}
+
+// ── SETUP ────────────────────────────────────────────────────
+async function runSetup() {
+  if (!confirm('Initialize/repair all database sheets? Safe to run at any time.')) return;
+  showLoading('Initializing database...');
+  try {
+    const res = await callAPI('setup');
+    if (res.success) toast('Database initialized!', 'success');
+    else toast('Setup error: ' + res.error, 'error');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+  finally { hideLoading(); }
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────
+async function loadDashboard() {
+  const container = document.getElementById('pageContent');
+  if (!document.getElementById('statTotalItems'))
+    container.innerHTML = getDashboardTemplate();
+  try {
+    const res = await callAPI('getDashboard');
+    if (res.success) renderDashboard(res.data);
+    else toast('Dashboard error: ' + res.error, 'error');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function getDashboardTemplate() {
+  return `<div id="page-dashboard">
+    <div class="page-header">
+      <div><div class="page-title">📊 Dashboard</div><div class="page-sub" id="dashboardLastUpdated">Loading...</div></div>
+      <div class="page-actions">
+        <button class="btn btn-outline btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="showPage('purchase-orders')">+ New PO</button>
+      </div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card blue"><div class="stat-icon">🗃️</div><div class="stat-value" id="statTotalItems">—</div><div class="stat-label">Inventory Items</div></div>
+      <div class="stat-card green"><div class="stat-icon">📦</div><div class="stat-value" id="statTotalStock">—</div><div class="stat-label">Total Stock (Mtrs)</div></div>
+      <div class="stat-card orange"><div class="stat-icon">⬆️</div><div class="stat-value" id="statTodayIssue">—</div><div class="stat-label">Today's Issues</div></div>
+      <div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-value" id="statLowStock">—</div><div class="stat-label">Low Stock Alerts</div></div>
+      <div class="stat-card blue"><div class="stat-icon">📋</div><div class="stat-value" id="statPendingPOs">—</div><div class="stat-label">Pending POs</div></div>
+      <div class="stat-card teal"><div class="stat-icon">📈</div><div class="stat-value" id="statMonthIssue">—</div><div class="stat-label">Monthly Issued (Mtrs)</div></div>
+    </div>
+    <div class="grid-2 mb-2" style="gap:20px">
+      <div class="card"><div class="card-header"><span class="card-title">📅 Daily Issue Trend (7 Days)</span></div><div class="card-body"><div class="chart-canvas-wrap"><canvas id="dailyTrendChart"></canvas></div></div></div>
+      <div class="card"><div class="card-header"><span class="card-title">📆 Monthly Consumption (6 Months)</span></div><div class="card-body"><div class="chart-canvas-wrap"><canvas id="monthlyTrendChart"></canvas></div></div></div>
+    </div>
+    <div class="grid-3 mb-2" style="gap:20px">
+      <div class="card"><div class="card-header"><span class="card-title">🏷️ Top Consumed Articles</span></div><div class="card-body" style="padding:12px" id="topArticlesList"><div class="table-empty">Loading...</div></div></div>
+      <div class="card"><div class="card-header"><span class="card-title">🏭 Top Vendors</span></div><div class="card-body" style="padding:12px" id="topVendorsList"><div class="table-empty">Loading...</div></div></div>
+      <div class="card"><div class="card-header"><span class="card-title" style="color:var(--danger-light)">⚠️ Low Stock Alerts</span><button class="btn btn-xs btn-outline" onclick="showPage('inventory')">View All</button></div><div class="card-body" style="padding:12px" id="lowStockList"><div class="table-empty">Loading...</div></div></div>
+    </div>
+    <div class="card"><div class="card-header"><span class="card-title">🎨 Color-wise Consumption</span></div><div class="card-body"><div class="chart-canvas-wrap" style="height:180px"><canvas id="colorChart"></canvas></div></div></div>
+  </div>`;
+}
+
+// ── PURCHASE ORDERS ───────────────────────────────────────────
+async function loadPurchaseOrders() {
+  const [posRes, vendorsRes] = await Promise.all([
+    callAPI('getPOs', { status: 'All' }),
+    callAPI('getVendors')
+  ]);
+  state.pos     = posRes.success ? posRes.data : [];
+  state.vendors = vendorsRes.data || [];
+
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div><div class="page-title">📋 Purchase Orders</div><div class="page-sub">Manage fabric procurement orders</div></div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('poTable','PurchaseOrders')">⬇ Export CSV</button>
+      <button class="btn btn-outline btn-sm" onclick="showCreatePOModal()">+ Create PO</button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <div class="form-group"><div class="form-label">Status</div>
+      <select class="form-control" id="poStatusFilter" onchange="filterPOs()">
+        <option>All</option><option>Pending</option><option>Partial</option><option>Completed</option><option>Cancelled</option>
+      </select></div>
+    <div class="form-group"><div class="form-label">Vendor</div>
+      <input class="form-control" id="poVendorFilter" placeholder="Search vendor..." oninput="filterPOs()"/></div>
+    <div class="form-group"><div class="form-label">Article</div>
+      <input class="form-control" id="poArticleFilter" placeholder="Article number..." oninput="filterPOs()"/></div>
+    <button class="btn btn-outline btn-sm" style="align-self:flex-end" onclick="resetPOFilters()">Clear</button>
+  </div>
+  <div class="card"><div class="table-wrap">
+    <table class="table" id="poTable">
+      <thead><tr>
+        <th>PO Number</th><th>Vendor</th><th>Article</th><th>Fabric</th><th>Color</th>
+        <th>Width</th><th>Ordered Qty</th><th>Received</th><th>Balance</th>
+        <th>Delivery</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="poTableBody">${renderPORows(state.pos)}</tbody>
+    </table>
+  </div></div>`;
+}
+
+function renderPORows(pos) {
+  if (!pos || !pos.length) return '<tr><td colspan="12" class="table-empty">No purchase orders found</td></tr>';
+  return pos.map(po => `<tr>
+    <td class="mono fw-bold">${po.PO_Number}</td><td>${po.Vendor_Name}</td>
+    <td class="fs-sm">${po.Article_Number||'—'}</td><td>${po.Fabric_Name}</td><td>${po.Color}</td>
+    <td class="fs-sm">${po.Width} ${po.Width_Unit}</td>
+    <td class="fw-bold">${fmtNum(po.Ordered_Qty)} ${po.Unit}</td>
+    <td class="text-success">${fmtNum(po.Total_Received)}</td>
+    <td class="${po.Balance_Qty>0?'text-warning':'text-success'} fw-bold">${fmtNum(po.Balance_Qty)}</td>
+    <td class="fs-sm">${fmtDate(po.Delivery_Date)}</td>
+    <td><span class="badge ${poStatusBadge(po.Status)}">${po.Status}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-xs btn-outline" onclick="viewPO('${po.PO_Number}')">View</button>
+      <button class="btn btn-xs btn-success" onclick="showReceiveModal('${po.PO_Number}')" ${po.Status==='Completed'||po.Status==='Cancelled'?'disabled':''}>Receive</button>
+    </td>
+  </tr>`).join('');
+}
+
+function filterPOs() {
+  const status  = document.getElementById('poStatusFilter').value;
+  const vendor  = (document.getElementById('poVendorFilter').value||'').toLowerCase();
+  const article = (document.getElementById('poArticleFilter').value||'').toLowerCase();
+  const filtered = (state.pos||[]).filter(po => {
+    if (status !== 'All' && po.Status !== status) return false;
+    if (vendor  && !po.Vendor_Name.toLowerCase().includes(vendor)) return false;
+    if (article && !String(po.Article_Number).toLowerCase().includes(article)) return false;
+    return true;
+  });
+  document.getElementById('poTableBody').innerHTML = renderPORows(filtered);
+}
+
+function resetPOFilters() {
+  ['poStatusFilter','poVendorFilter','poArticleFilter'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value=el.tagName==='SELECT'?'All':'';
+  });
+  document.getElementById('poTableBody').innerHTML = renderPORows(state.pos);
+}
+
+function poStatusBadge(s) {
+  return {Pending:'badge-warning',Partial:'badge-info',Completed:'badge-success',Cancelled:'badge-danger'}[s]||'badge-secondary';
+}
+
+// ── CREATE PO MODAL — Vendor dropdown visible to ALL users ────
+function showCreatePOModal() {
+  const vendorOpts = (state.vendors||[]).map(v=>`<option value="${v.Vendor_Name}">${v.Vendor_Name}</option>`).join('');
+  openModal('Create Purchase Order', `
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">Vendor Name</label>
+        <select class="form-control" id="po_vendor" required>
+          <option value="">-- Select Vendor --</option>${vendorOpts}
+        </select></div>
+      <div class="form-group"><label class="form-label">Article Number</label><input class="form-control" id="po_article" placeholder="ART-1025"/></div>
+      <div class="form-group"><label class="form-label required">Fabric Name</label><input class="form-control" id="po_fabric" required/></div>
+      <div class="form-group"><label class="form-label required">Color</label><input class="form-control" id="po_color" required/></div>
+      <div class="form-group"><label class="form-label">Width</label><input class="form-control" id="po_width" type="number"/></div>
+      <div class="form-group"><label class="form-label">Width Unit</label>
+        <select class="form-control" id="po_widthUnit"><option>Inch</option><option>CM</option><option>Meter</option></select></div>
+      <div class="form-group"><label class="form-label required">Ordered Qty</label><input class="form-control" id="po_qty" type="number" min="1" step="0.01" required/></div>
+        <div class="form-group">
+        <label class="form-label">Rate</label>
+        <input class="form-control" id="po_rate" type="number" step="0.01" min="0" placeholder="0.00"/>
+      </div>
+      <div class="form-group"><label class="form-label">Unit</label>
+        <select class="form-control" id="po_unit"><option>Meter</option><option>Yard</option><option>Roll</option><option>KG</option></select></div>
+      <div class="form-group"><label class="form-label required">Delivery Date</label><input class="form-control" id="po_delivery" type="date" required/></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" id="po_notes" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'✓ Create PO',cls:'btn-primary',action:submitCreatePO}
+  ]);
+}
+
+async function submitCreatePO() {
+  const vendor = document.getElementById('po_vendor').value;
+  if (!vendor) { toast('Please select a vendor','warning'); return; }
+  const fabric = document.getElementById('po_fabric').value;
+  if (!fabric) { toast('Fabric Name is required','warning'); return; }
+  const color = document.getElementById('po_color').value;
+  if (!color) { toast('Color is required','warning'); return; }
+  const qty = document.getElementById('po_qty').value;
+  if (!qty || parseFloat(qty) <= 0) { toast('Valid Ordered Quantity is required','warning'); return; }
+  const delivery = document.getElementById('po_delivery').value;
+  if (!delivery) { toast('Delivery Date is required','warning'); return; }
+
+  // 1. Safely extract the rate value from the correct input ID element
+  const rateValue = document.getElementById('po_rate').value;
+
+  showLoading('Creating PO...');
+  try {
+    const res = await callAPI('createPO',{
+      vendorName   : vendor,
+      articleNumber: document.getElementById('po_article').value,
+      fabricName   : fabric,
+      color        : color,
+      width        : document.getElementById('po_width').value,
+      widthUnit    : document.getElementById('po_widthUnit').value,
+      orderedQty   : qty,
+      
+      // 2. Pass the extracted rate variable down to Apps Script payload
+      rate         : rateValue,
+      
+      unit         : document.getElementById('po_unit').value,
+      deliveryDate : delivery,
+      notes        : document.getElementById('po_notes').value
+    });
+    if(res.success){toast('PO '+res.data.poNumber+' created!','success');closeModal();await loadPurchaseOrders();}
+    else toast('Error: '+res.error,'error');
+  } catch(e){toast('Error: '+e.message,'error');}
+  finally{hideLoading();}
+}
+
+async function viewPO(poNumber) {
+  showLoading('Loading PO...');
+  const res = await callAPI('getPOById',{id:poNumber});
+  hideLoading();
+  if(!res.success){toast('Error: '+res.error,'error');return;}
+  const po=res.data;
+  openModal('PO: '+poNumber,`
+    <div class="form-grid">
+      ${infoRow('PO Number',po.PO_Number)}${infoRow('Vendor',po.Vendor_Name)}
+      ${infoRow('Article',po.Article_Number||'—')}${infoRow('Fabric',po.Fabric_Name)}
+      ${infoRow('Color',po.Color)}${infoRow('Width',po.Width+' '+po.Width_Unit)}
+      ${infoRow('Ordered',fmtNum(po.Ordered_Qty)+' '+po.Unit)}${infoRow('Received',fmtNum(po.Total_Received)+' '+po.Unit)}
+      ${infoRow('Balance',fmtNum(po.Balance_Qty)+' '+po.Unit)}${infoRow('Delivery',fmtDate(po.Delivery_Date))}
+      ${infoRow('Status','<span class="badge '+poStatusBadge(po.Status)+'">'+po.Status+'</span>')}
+      ${infoRow('Created',fmtDateTime(po.Created_At))}
+    </div>
+    ${po.receipts&&po.receipts.length?`<hr class="divider"/><div class="fw-600 mb-1">GRN History (${po.receipts.length})</div>
+    <div class="table-wrap"><table class="table"><thead><tr><th>GRN</th><th>Qty</th><th>Batch</th><th>Date</th></tr></thead>
+    <tbody>${po.receipts.map(r=>`<tr><td class="mono">${r.GRN_Number}</td><td>${fmtNum(r.Received_Qty)}</td><td>${r.Batch_Number||'—'}</td><td class="fs-sm">${fmtDate(r.Received_At)}</td></tr>`).join('')}</tbody></table></div>`:''}
+  `,[{label:'Close',cls:'btn-outline',action:closeModal}]);
+}
+
+// ── FABRIC RECEIVING ──────────────────────────────────────────
+async function loadFabricReceiving() {
+  const [posRes,receiptsRes] = await Promise.all([callAPI('getPOs',{status:'All'}),callAPI('getReceipts',{})]);
+  state.pendingPOs = (posRes.data||[]).filter(p=>p.Status!=='Completed'&&p.Status!=='Cancelled');
+  const receipts=receiptsRes.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">📦 Fabric Receiving</div><div class="page-sub">GRN Management & Inventory Update</div></div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="showReceiveModal()">📦 Receive Fabric</button></div>
+  </div>
+  <div class="card mb-2">
+    <div class="card-header"><span class="card-title">Pending POs (${state.pendingPOs.length})</span></div>
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>PO No.</th><th>Vendor</th><th>Fabric</th><th>Color</th><th>Ordered</th><th>Received</th><th>Balance</th><th>Delivery</th><th>Action</th></tr></thead>
+      <tbody>${state.pendingPOs.length?state.pendingPOs.map(po=>`<tr>
+        <td class="mono fw-bold">${po.PO_Number}</td><td>${po.Vendor_Name}</td><td>${po.Fabric_Name}</td><td>${po.Color}</td>
+        <td>${fmtNum(po.Ordered_Qty)}</td><td class="text-success">${fmtNum(po.Total_Received)}</td>
+        <td class="fw-bold text-warning">${fmtNum(po.Balance_Qty)}</td><td class="fs-sm">${fmtDate(po.Delivery_Date)}</td>
+        <td><button class="btn btn-sm btn-success" onclick="showReceiveModal('${po.PO_Number}')">📦 Receive</button></td>
+      </tr>`).join(''):'<tr><td colspan="9" class="table-empty">No pending POs</td></tr>'}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Recent GRNs (${receipts.length})</span>
+      <button class="btn btn-xs btn-outline" onclick="exportTableToCSV('grnTable','GRNs')">⬇ Export</button></div>
+    <div class="table-wrap"><table class="table" id="grnTable">
+      <thead><tr><th>GRN No.</th><th>PO No.</th><th>Vendor</th><th>Fabric</th><th>Color</th><th>Qty</th><th>Batch</th><th>Quality</th><th>Received At</th></tr></thead>
+      <tbody>${receipts.slice(0,50).map(r=>`<tr>
+        <td class="mono">${r.GRN_Number}</td><td class="mono">${r.PO_Number}</td><td>${r.Vendor_Name}</td>
+        <td>${r.Fabric_Name}</td><td>${r.Color}</td><td class="fw-bold">${fmtNum(r.Received_Qty)} ${r.Unit}</td>
+        <td class="mono fs-sm">${r.Batch_Number}</td>
+        <td><span class="badge ${r.Quality_Status==='Approved'?'badge-success':r.Quality_Status==='Rejected'?'badge-danger':'badge-warning'}">${r.Quality_Status}</span></td>
+        <td class="fs-sm">${fmtDateTime(r.Received_At)}</td>
+      </tr>`).join('')}
+      ${receipts.length===0?'<tr><td colspan="9" class="table-empty">No GRNs yet</td></tr>':''}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function showReceiveModal(poNumber) {
+  const poOpts=(state.pendingPOs||[]).map(p=>
+    `<option value="${p.PO_Number}" ${p.PO_Number===poNumber?'selected':''}>${p.PO_Number} | ${p.Vendor_Name} | ${p.Fabric_Name} | Balance: ${fmtNum(p.Balance_Qty)}</option>`
+  ).join('');
+  openModal('Receive Fabric / Create GRN',`
+    <div class="info-box mb-2">Select the PO and enter received quantity. Inventory will update automatically.</div>
+    <div class="form-group"><label class="form-label required">Purchase Order</label>
+      <select class="form-control" id="rec_po" required onchange="updatePOBalance(this.value)">
+        <option value="">-- Select PO --</option>${poOpts}</select></div>
+    <div id="poBalanceInfo" class="success-box mb-1" style="display:none"></div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">Received Qty</label><input class="form-control" id="rec_qty" type="number" min="0.01" step="0.01" required/></div>
+      <div class="form-group"><label class="form-label">Batch Number</label><input class="form-control" id="rec_batch" placeholder="Auto-generated if blank"/></div>
+      <div class="form-group"><label class="form-label">Dye Lot</label><input class="form-control" id="rec_dyeLot"/></div>
+      <div class="form-group"><label class="form-label">Quality Status</label>
+        <select class="form-control" id="rec_quality"><option>Approved</option><option>Hold</option><option>Rejected</option></select></div>
+      <div class="form-group"><label class="form-label">Storage Location</label><input class="form-control" id="rec_location" placeholder="e.g. Rack A-12"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" id="rec_notes" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'✓ Save GRN & Update Stock',cls:'btn-success',action:submitReceiveFabric}
+  ]);
+  if(poNumber) setTimeout(()=>updatePOBalance(poNumber),50);
+}
+
+function updatePOBalance(poNumber) {
+  const po=(state.pendingPOs||[]).find(p=>p.PO_Number===poNumber);
+  const el=document.getElementById('poBalanceInfo');
+  if(po&&el){
+    el.style.display='block';
+    el.textContent=`Ordered: ${fmtNum(po.Ordered_Qty)} | Received: ${fmtNum(po.Total_Received)} | Balance: ${fmtNum(po.Balance_Qty)} ${po.Unit}`;
+    const qe=document.getElementById('rec_qty'); if(qe) qe.max=po.Balance_Qty;
+  }
+}
+
+async function submitReceiveFabric() {
+  const po=document.getElementById('rec_po').value;
+  if(!po){toast('Select a Purchase Order','warning');return;}
+  showLoading('Creating GRN...');
+  try{
+    const res=await callAPI('receivefabric',{
+      poNumber:po,receivedQty:document.getElementById('rec_qty').value,
+      batchNumber:document.getElementById('rec_batch').value,dyeLot:document.getElementById('rec_dyeLot').value,
+      qualityStatus:document.getElementById('rec_quality').value,storageLocation:document.getElementById('rec_location').value,
+      notes:document.getElementById('rec_notes').value
+    });
+    if(res.success){toast('GRN '+res.data.grnNumber+' created! Stock: '+res.data.previousStock+' → '+res.data.updatedStock,'success');closeModal();await loadFabricReceiving();}
+    else toast('Error: '+res.error,'error');
+  }catch(e){toast('Error: '+e.message,'error');}
+  finally{hideLoading();}
+}
+
+// ── INVENTORY ─────────────────────────────────────────────────
+async function loadInventory() {
+  const [invRes,vendorsRes]=await Promise.all([callAPI('getInventory',{}),callAPI('getVendors')]);
+  state.inventory=invRes.data||[]; state.vendors=vendorsRes.data||[];
+  const totalStock=state.inventory.reduce((s,i)=>s+(parseFloat(i.Current_Stock)||0),0);
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">🗃️ Inventory Master</div><div class="page-sub">${state.inventory.length} items · Total: ${fmtNum(totalStock)} units</div></div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('invTable','Inventory')">⬇ Export</button>
+      <button class="btn btn-primary" onclick="showAddInventoryModal()">+ Add Item</button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <div class="form-group"><div class="form-label">Search</div><input class="form-control" id="invSearch" placeholder="Article, fabric, color..." oninput="filterInventory()"/></div>
+    <div class="form-group"><div class="form-label">Vendor</div><input class="form-control" id="invVendor" placeholder="Vendor..." oninput="filterInventory()"/></div>
+    <div class="form-group"><div class="form-label">Stock Level</div>
+      <select class="form-control" id="invStockFilter" onchange="filterInventory()"><option value="">All</option><option value="low">⚠️ Low Stock</option><option value="ok">✅ Normal</option></select></div>
+    <button class="btn btn-outline btn-sm" style="align-self:flex-end" onclick="resetInvFilters()">Clear</button>
+  </div>
+  <div class="card"><div class="table-wrap">
+    <table class="table" id="invTable">
+      <thead><tr><th>Inv. ID</th><th>Article</th><th>Fabric</th><th>Color</th><th>Width</th><th>Vendor</th><th>Unit</th><th>Opening</th><th>Current Stock</th><th>Reorder</th><th>Location</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+      <tbody id="invTableBody">${renderInvRows(state.inventory)}</tbody>
+    </table>
+  </div></div>`;
+}
+
+function renderInvRows(items) {
+  if(!items||!items.length) return '<tr><td colspan="14" class="table-empty">No inventory items</td></tr>';
+  return items.map(inv=>{
+    const cur=parseFloat(inv.Current_Stock)||0,reorder=parseFloat(inv.Reorder_Level)||0;
+    const pct=reorder>0?Math.min(100,Math.round((cur/reorder)*100)):100;
+    const cls=cur<=reorder?'low':cur<=reorder*1.5?'med':'high';
+    return `<tr>
+      <td class="mono fs-sm">${inv.Inventory_ID}</td><td class="fs-sm">${inv.Article_Number||'—'}</td>
+      <td class="fw-600">${inv.Fabric_Name}</td><td>${inv.Color}</td>
+      <td class="fs-sm">${inv.Width} ${inv.Width_Unit}</td><td class="fs-sm">${inv.Vendor_Name}</td>
+      <td class="fs-sm">${inv.Unit}</td><td class="fs-sm">${fmtNum(inv.Opening_Stock)}</td>
+      <td><div class="fw-bold ${cur<=reorder?'text-danger':''}">${fmtNum(cur)}</div>
+          <div class="stock-bar-wrap"><div class="stock-bar ${cls}" style="width:${pct}%"></div></div></td>
+      <td class="fs-sm">${fmtNum(reorder)}</td>
+      <td class="fs-sm ellipsis" style="max-width:100px">${inv.Storage_Location||'—'}</td>
+      <td><span class="badge ${inv.Status==='Active'?'badge-success':'badge-secondary'}">${inv.Status}</span>
+          ${cur<=reorder?'<span class="badge badge-danger" style="margin-left:3px">LOW</span>':''}</td>
+      <td class="fs-sm">${fmtDate(inv.Last_Updated)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-xs btn-outline" onclick="viewInventoryItem('${inv.Inventory_ID}')">View</button>
+        <button class="btn btn-xs btn-primary" onclick="showIssueStockModal('${inv.Inventory_ID}')">Issue</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterInventory() {
+  const q=(document.getElementById('invSearch').value||'').toLowerCase();
+  const vendor=(document.getElementById('invVendor').value||'').toLowerCase();
+  const stockF=document.getElementById('invStockFilter').value;
+  const filtered=(state.inventory||[]).filter(inv=>{
+    if(q&&!`${inv.Article_Number} ${inv.Fabric_Name} ${inv.Color}`.toLowerCase().includes(q)) return false;
+    if(vendor&&!inv.Vendor_Name.toLowerCase().includes(vendor)) return false;
+    const cur=parseFloat(inv.Current_Stock)||0,reorder=parseFloat(inv.Reorder_Level)||0;
+    if(stockF==='low'&&cur>reorder) return false;
+    if(stockF==='ok'&&cur<=reorder) return false;
+    return true;
+  });
+  document.getElementById('invTableBody').innerHTML=renderInvRows(filtered);
+}
+
+function resetInvFilters() {
+  ['invSearch','invVendor','invStockFilter'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('invTableBody').innerHTML=renderInvRows(state.inventory);
+}
+
+function showAddInventoryModal() {
+  const vendorOpts=(state.vendors||[]).map(v=>`<option value="${v.Vendor_Name}">${v.Vendor_Name}</option>`).join('');
+  openModal('Add Inventory Item',`
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Article Number</label><input class="form-control" id="inv_article"/></div>
+      <div class="form-group"><label class="form-label required">Fabric Name</label><input class="form-control" id="inv_fabric" required/></div>
+      <div class="form-group"><label class="form-label required">Color</label><input class="form-control" id="inv_color" required/></div>
+      <div class="form-group"><label class="form-label required">Vendor</label>
+        <select class="form-control" id="inv_vendor" required><option value="">-- Select --</option>${vendorOpts}</select></div>
+      <div class="form-group"><label class="form-label">Width</label><input class="form-control" id="inv_width" type="number"/></div>
+      <div class="form-group"><label class="form-label">Width Unit</label>
+        <select class="form-control" id="inv_widthUnit"><option>Inch</option><option>CM</option><option>Meter</option></select></div>
+      <div class="form-group"><label class="form-label">Unit</label>
+        <select class="form-control" id="inv_unit"><option>Meter</option><option>Yard</option><option>Roll</option><option>KG</option></select></div>
+      <div class="form-group"><label class="form-label">Opening Stock</label><input class="form-control" id="inv_opening" type="number" min="0" value="0"/></div>
+      <div class="form-group"><label class="form-label">Reorder Level</label><input class="form-control" id="inv_reorder" type="number" min="0" value="50"/></div>
+      <div class="form-group"><label class="form-label">Storage Location</label><input class="form-control" id="inv_location"/></div>
+    </div>`,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'+ Add Item',cls:'btn-primary',action:async()=>{
+      showLoading('Adding...');
+      const res=await callAPI('addInventoryItem',{
+        articleNumber:document.getElementById('inv_article').value,fabricName:document.getElementById('inv_fabric').value,
+        color:document.getElementById('inv_color').value,vendorName:document.getElementById('inv_vendor').value,
+        width:document.getElementById('inv_width').value,widthUnit:document.getElementById('inv_widthUnit').value,
+        unit:document.getElementById('inv_unit').value,openingStock:document.getElementById('inv_opening').value,
+        reorderLevel:document.getElementById('inv_reorder').value,storageLocation:document.getElementById('inv_location').value
+      });
+      hideLoading();
+      if(res.success){toast('Item added!','success');closeModal();loadInventory();}
+      else toast('Error: '+res.error,'error');
+    }}
+  ]);
+}
+
+async function viewInventoryItem(id) {
+  showLoading(); const res=await callAPI('getInventoryById',{id}); hideLoading();
+  if(!res.success){toast('Error','error');return;}
+  const inv=res.data;
+  openModal('Inventory: '+inv.Inventory_ID,`
+    <div class="form-grid">
+      ${infoRow('ID',inv.Inventory_ID)}${infoRow('Article',inv.Article_Number||'—')}
+      ${infoRow('Fabric',inv.Fabric_Name)}${infoRow('Color',inv.Color)}
+      ${infoRow('Width',inv.Width+' '+inv.Width_Unit)}${infoRow('Vendor',inv.Vendor_Name)}
+      ${infoRow('Unit',inv.Unit)}${infoRow('Opening Stock',fmtNum(inv.Opening_Stock))}
+      ${infoRow('Current Stock','<strong class="'+(parseFloat(inv.Current_Stock)<=parseFloat(inv.Reorder_Level)?'text-danger':'')+'">'+fmtNum(inv.Current_Stock)+'</strong>')}
+      ${infoRow('Reorder Level',fmtNum(inv.Reorder_Level))}${infoRow('Location',inv.Storage_Location||'—')}
+      ${infoRow('Last Updated',fmtDateTime(inv.Last_Updated))}${infoRow('Last Txn',inv.Last_Transaction)}
+    </div>
+    <div class="mt-1"><button class="btn btn-primary btn-sm" onclick="showIssueStockModal('${inv.Inventory_ID}');closeModal()">Issue Stock</button></div>
+  `,[{label:'Close',cls:'btn-outline',action:closeModal}]);
+}
+
+// ── STOCK ISSUE ───────────────────────────────────────────────
+async function loadStockIssue() {
+  const [issRes,invRes]=await Promise.all([callAPI('getIssues',{}),callAPI('getInventory',{})]);
+  state.issues=issRes.data||[]; state.inventory=invRes.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">⬆️ Stock Issue</div><div class="page-sub">Issue fabric to production departments</div></div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('issueTable','StockIssues')">⬇ Export</button>
+      <button class="btn btn-primary" onclick="showIssueStockModal()">+ Issue Stock</button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <div class="form-group"><div class="form-label">Department</div>
+      <select class="form-control" id="issDeptFilter" onchange="filterIssues()"><option value="">All Depts</option>
+        ${[...new Set((state.issues||[]).map(i=>i.Department).filter(Boolean))].map(d=>`<option>${d}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><div class="form-label">Date From</div><input class="form-control" id="issDateFrom" type="date" onchange="filterIssues()"/></div>
+    <div class="form-group"><div class="form-label">Date To</div><input class="form-control" id="issDateTo" type="date" onchange="filterIssues()"/></div>
+    <button class="btn btn-outline btn-sm" style="align-self:flex-end" onclick="resetIssueFilters()">Clear</button>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="table" id="issueTable">
+    <thead><tr><th>Issue ID</th><th>Article</th><th>Fabric</th><th>Color</th><th>Issue Qty</th><th>Stock Before</th><th>Stock After</th><th>Dept</th><th>Prod. Order</th><th>Issued By</th><th>Issued At</th><th>Action</th></tr></thead>
+    <tbody id="issueTableBody">${renderIssueRows(state.issues)}</tbody>
+  </table></div></div>`;
+}
+
+function renderIssueRows(items) {
+  if(!items||!items.length) return '<tr><td colspan="12" class="table-empty">No issue records</td></tr>';
+  return items.slice(0,100).map(i=>`<tr>
+    <td class="mono fs-sm">${i.Issue_ID}</td><td class="fs-sm">${i.Article_Number||'—'}</td>
+    <td>${i.Fabric_Name}</td><td>${i.Color}</td>
+    <td class="fw-bold text-danger">${fmtNum(i.Issue_Qty)} ${i.Unit}</td>
+    <td class="fs-sm">${fmtNum(i.Stock_Before)}</td><td class="fw-bold">${fmtNum(i.Stock_After)}</td>
+    <td><span class="badge badge-info">${i.Department}</span></td>
+    <td class="mono fs-sm">${i.Production_Order||'—'}</td>
+    <td class="fs-sm">${i.Issued_By}</td><td class="fs-sm">${fmtDateTime(i.Issued_At)}</td>
+    <td><button class="btn btn-xs btn-outline" onclick="showReturnStockModal('${i.Issue_ID}')">↩ Return</button></td>
+  </tr>`).join('');
+}
+
+function filterIssues() {
+  const dept=document.getElementById('issDeptFilter').value;
+  const dateFrom=document.getElementById('issDateFrom').value;
+  const dateTo=document.getElementById('issDateTo').value;
+  const filtered=(state.issues||[]).filter(i=>{
+    if(dept&&i.Department!==dept) return false;
+    if(dateFrom&&new Date(i.Issued_At)<new Date(dateFrom)) return false;
+    if(dateTo&&new Date(i.Issued_At)>new Date(dateTo+'T23:59:59')) return false;
+    return true;
+  });
+  document.getElementById('issueTableBody').innerHTML=renderIssueRows(filtered);
+}
+
+function resetIssueFilters() {
+  ['issDeptFilter','issDateFrom','issDateTo'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('issueTableBody').innerHTML=renderIssueRows(state.issues);
+}
+
+async function showIssueStockModal(inventoryId) {
+  const invItems=state.inventory.filter(i=>parseFloat(i.Current_Stock)>0);
+  const prodOrders=(await callAPI('getProductionOrders')).data||[];
+  const invOpts=invItems.map(i=>`<option value="${i.Inventory_ID}" ${i.Inventory_ID===inventoryId?'selected':''}>${i.Article_Number||''} | ${i.Fabric_Name} | ${i.Color} | Stock: ${fmtNum(i.Current_Stock)} ${i.Unit}</option>`).join('');
+  const prodOpts=prodOrders.map(p=>`<option value="${p.PO_Number}">${p.PO_Number} - ${p.Product_Name}</option>`).join('');
+  openModal('Issue Stock to Production',`
+    <div class="warn-box mb-2">⚠️ Issuing stock immediately reduces inventory. Verify quantities.</div>
+    <div class="form-group"><label class="form-label required">Inventory Item</label>
+      <select class="form-control" id="iss_inv" required onchange="updateIssueStockInfo(this.value)"><option value="">-- Select --</option>${invOpts}</select></div>
+    <div id="issStockInfo" class="info-box mb-1" style="display:none"></div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">Issue Qty</label><input class="form-control" id="iss_qty" type="number" min="0.01" step="0.01" required/></div>
+      <div class="form-group"><label class="form-label required">Department</label>
+        <select class="form-control" id="iss_dept" required><option value="">-- Select --</option>
+          <option>Cutting</option><option>Stitching</option><option>Finishing</option><option>Embroidery</option><option>Printing</option><option>Packing</option><option>Other</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Production Order</label>
+        <select class="form-control" id="iss_prod"><option value="">-- Optional --</option>${prodOpts}</select></div>
+      <div class="form-group"><label class="form-label">Batch Number</label><input class="form-control" id="iss_batch"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" id="iss_notes" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'⬆️ Issue Stock',cls:'btn-danger',action:submitIssueStock}
+  ]);
+  if(inventoryId) setTimeout(()=>updateIssueStockInfo(inventoryId),50);
+}
+
+function updateIssueStockInfo(invId) {
+  const inv=state.inventory.find(i=>i.Inventory_ID===invId);
+  const el=document.getElementById('issStockInfo');
+  if(inv&&el){
+    el.style.display='block';
+    el.innerHTML=`<strong>Available: ${fmtNum(inv.Current_Stock)} ${inv.Unit}</strong> &nbsp;|&nbsp; Reorder: ${fmtNum(inv.Reorder_Level)} | Location: ${inv.Storage_Location||'—'}`;
+    const qe=document.getElementById('iss_qty'); if(qe) qe.max=inv.Current_Stock;
+  }
+}
+
+async function submitIssueStock() {
+  const invId=document.getElementById('iss_inv').value;
+  const dept=document.getElementById('iss_dept').value;
+  if(!invId||!dept){toast('Select item and department','warning');return;}
+  showLoading('Issuing stock...');
+  try{
+    const res=await callAPI('issueStock',{
+      inventoryId:invId,issueQty:document.getElementById('iss_qty').value,
+      department:dept,productionOrder:document.getElementById('iss_prod').value,
+      batchNumber:document.getElementById('iss_batch').value,notes:document.getElementById('iss_notes').value
+    });
+    if(res.success){
+      const d=res.data;
+      toast('Issued '+d.issuedQty+' units. Stock: '+d.previousStock+' → '+d.currentStock+(d.lowStockAlert?' ⚠️ Low!':''),d.lowStockAlert?'warning':'success');
+      closeModal();await loadStockIssue();
+    }else toast('Error: '+res.error,'error');
+  }catch(e){toast('Error: '+e.message,'error');}
+  finally{hideLoading();}
+}
+
+// ── STOCK RETURNS ─────────────────────────────────────────────
+async function loadStockReturns() {
+  const [retRes,issRes]=await Promise.all([callAPI('getReturns',{}),callAPI('getIssues',{})]);
+  state.returns=retRes.data||[]; state.issues=issRes.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">↩️ Stock Returns</div><div class="page-sub">Return unused fabric to inventory</div></div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="showReturnStockModal()">↩ Return Stock</button></div>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="table">
+    <thead><tr><th>Return ID</th><th>Issue ID</th><th>Fabric</th><th>Color</th><th>Return Qty</th><th>Stock Before</th><th>Stock After</th><th>Reason</th><th>Returned By</th><th>Returned At</th></tr></thead>
+    <tbody>${(state.returns||[]).slice(0,100).map(r=>`<tr>
+      <td class="mono fs-sm">${r.Return_ID}</td><td class="mono fs-sm">${r.Issue_ID}</td>
+      <td>${r.Fabric_Name}</td><td>${r.Color}</td>
+      <td class="fw-bold text-success">+${fmtNum(r.Return_Qty)} ${r.Unit}</td>
+      <td class="fs-sm">${fmtNum(r.Stock_Before)}</td><td class="fw-bold">${fmtNum(r.Stock_After)}</td>
+      <td class="fs-sm">${r.Reason||'—'}</td><td class="fs-sm">${r.Returned_By}</td><td class="fs-sm">${fmtDateTime(r.Returned_At)}</td>
+    </tr>`).join('')}
+    ${state.returns.length===0?'<tr><td colspan="10" class="table-empty">No returns recorded</td></tr>':''}</tbody>
+  </table></div></div>`;
+}
+
+async function showReturnStockModal(issueId) {
+  const issues=state.issues.length?state.issues:(await callAPI('getIssues',{})).data||[];
+  const issOpts=issues.map(i=>`<option value="${i.Issue_ID}" ${i.Issue_ID===issueId?'selected':''}>${i.Issue_ID} | ${i.Fabric_Name} | ${i.Color} | Issued: ${fmtNum(i.Issue_Qty)} | ${i.Department}</option>`).join('');
+  openModal('Return Stock',`
+    <div class="success-box mb-2">Returned stock will be added back to inventory automatically.</div>
+    <div class="form-group"><label class="form-label required">Issue Record</label>
+      <select class="form-control" id="ret_issue" required><option value="">-- Select --</option>${issOpts}</select></div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">Return Qty</label><input class="form-control" id="ret_qty" type="number" min="0.01" step="0.01" required/></div>
+      <div class="form-group"><label class="form-label">Reason</label>
+        <select class="form-control" id="ret_reason"><option>Excess Fabric</option><option>Quality Issue</option><option>Order Cancelled</option><option>Design Change</option><option>Other</option></select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" id="ret_notes" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'↩ Return Stock',cls:'btn-success',action:async()=>{
+      showLoading('Processing...');
+      const res=await callAPI('returnStock',{
+        issueId:document.getElementById('ret_issue').value,returnQty:document.getElementById('ret_qty').value,
+        reason:document.getElementById('ret_reason').value,notes:document.getElementById('ret_notes').value
+      });
+      hideLoading();
+      if(res.success){toast('Returned! New stock: '+res.data.currentStock,'success');closeModal();loadStockReturns();}
+      else toast('Error: '+res.error,'error');
+    }}
+  ]);
+}
+
+// ── VENDORS ───────────────────────────────────────────────────
+async function loadVendors() {
+  const res=await callAPI('getVendors'); state.vendors=res.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">🏭 Vendors</div><div class="page-sub">${state.vendors.length} vendors</div></div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="showAddVendorModal()">+ Add Vendor</button></div>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="table">
+    <thead><tr><th>Vendor ID</th><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>GST</th><th>Payment Terms</th><th>Status</th></tr></thead>
+    <tbody>${state.vendors.map(v=>`<tr>
+      <td class="mono fs-sm">${v.Vendor_ID}</td><td class="fw-bold">${v.Vendor_Name}</td>
+      <td class="fs-sm">${v.Contact_Person||'—'}</td><td class="fs-sm">${v.Phone||'—'}</td>
+      <td class="fs-sm">${v.Email||'—'}</td><td class="mono fs-sm">${v.GST_Number||'—'}</td>
+      <td class="fs-sm">${v.Payment_Terms}</td>
+      <td><span class="badge ${v.Status==='Active'?'badge-success':'badge-secondary'}">${v.Status}</span></td>
+    </tr>`).join('')}
+    ${state.vendors.length===0?'<tr><td colspan="8" class="table-empty">No vendors yet</td></tr>':''}</tbody>
+  </table></div></div>`;
+}
+
+function showAddVendorModal() {
+  openModal('Add Vendor',`
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">Vendor Name</label><input class="form-control" id="ven_name" required/></div>
+      <div class="form-group"><label class="form-label">Contact Person</label><input class="form-control" id="ven_contact"/></div>
+      <div class="form-group"><label class="form-label">Phone</label><input class="form-control" id="ven_phone"/></div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-control" id="ven_email" type="email"/></div>
+      <div class="form-group"><label class="form-label">GST Number</label><input class="form-control" id="ven_gst"/></div>
+      <div class="form-group"><label class="form-label">Payment Terms</label>
+        <select class="form-control" id="ven_terms"><option>30 days</option><option>45 days</option><option>60 days</option><option>Advance</option><option>Cash on Delivery</option></select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" id="ven_address" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'+ Add Vendor',cls:'btn-primary',action:async()=>{
+      showLoading('Adding...');
+      const res=await callAPI('addVendor',{
+        vendorName:document.getElementById('ven_name').value,contactPerson:document.getElementById('ven_contact').value,
+        phone:document.getElementById('ven_phone').value,email:document.getElementById('ven_email').value,
+        gstNumber:document.getElementById('ven_gst').value,paymentTerms:document.getElementById('ven_terms').value,
+        address:document.getElementById('ven_address').value
+      });
+      hideLoading();
+      if(res.success){toast('Vendor added!','success');closeModal();loadVendors();}
+      else toast('Error: '+res.error,'error');
+    }}
+  ]);
+}
+
+// ── PRODUCTION ORDERS ─────────────────────────────────────────
+async function loadProductionOrders() {
+  const res=await callAPI('getProductionOrders'); const orders=res.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">🏗️ Production Orders</div><div class="page-sub">${orders.length} orders</div></div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="showAddProdOrderModal()">+ Add Order</button></div>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="table">
+    <thead><tr><th>ID</th><th>PO Number</th><th>Product</th><th>Style</th><th>Qty</th><th>Start</th><th>End</th><th>Department</th><th>Status</th></tr></thead>
+    <tbody>${orders.map(o=>`<tr>
+      <td class="mono fs-sm">${o.PO_ID}</td><td class="mono">${o.PO_Number}</td>
+      <td class="fw-600">${o.Product_Name}</td><td class="fs-sm">${o.Style_Number||'—'}</td>
+      <td>${fmtNum(o.Quantity)}</td><td class="fs-sm">${fmtDate(o.Start_Date)}</td>
+      <td class="fs-sm">${fmtDate(o.End_Date)}</td><td class="fs-sm">${o.Department||'—'}</td>
+      <td><span class="badge badge-success">${o.Status}</span></td>
+    </tr>`).join('')}
+    ${orders.length===0?'<tr><td colspan="9" class="table-empty">No production orders</td></tr>':''}</tbody>
+  </table></div></div>`;
+}
+
+function showAddProdOrderModal() {
+  openModal('Add Production Order',`
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label required">PO Number</label><input class="form-control" id="prod_po" required/></div>
+      <div class="form-group"><label class="form-label required">Product Name</label><input class="form-control" id="prod_name" required/></div>
+      <div class="form-group"><label class="form-label">Style Number</label><input class="form-control" id="prod_style"/></div>
+      <div class="form-group"><label class="form-label">Quantity</label><input class="form-control" id="prod_qty" type="number"/></div>
+      <div class="form-group"><label class="form-label">Start Date</label><input class="form-control" id="prod_start" type="date"/></div>
+      <div class="form-group"><label class="form-label">End Date</label><input class="form-control" id="prod_end" type="date"/></div>
+      <div class="form-group"><label class="form-label">Department</label>
+        <select class="form-control" id="prod_dept"><option>Cutting</option><option>Stitching</option><option>Finishing</option><option>All</option></select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" id="prod_notes" rows="2"></textarea></div>
+  `,[
+    {label:'Cancel',cls:'btn-outline',action:closeModal},
+    {label:'+ Add',cls:'btn-primary',action:async()=>{
+      showLoading('Adding...');
+      const res=await callAPI('addProductionOrder',{
+        poNumber:document.getElementById('prod_po').value,productName:document.getElementById('prod_name').value,
+        styleNumber:document.getElementById('prod_style').value,quantity:document.getElementById('prod_qty').value,
+        startDate:document.getElementById('prod_start').value,endDate:document.getElementById('prod_end').value,
+        department:document.getElementById('prod_dept').value,notes:document.getElementById('prod_notes').value
+      });
+      hideLoading();
+      if(res.success){toast('Added!','success');closeModal();loadProductionOrders();}
+      else toast('Error: '+res.error,'error');
+    }}
+  ]);
+}
+
+// ── REPORTS ───────────────────────────────────────────────────
+async function loadReports() {
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">📈 Reports & Analytics</div><div class="page-sub">Generate and export ERP reports</div></div>
+  </div>
+  <div class="grid-3" style="gap:16px;margin-bottom:24px">
+    ${[
+      {icon:'📋',title:'Current Stock Report',desc:'Full inventory with stock levels',action:"runReport('stock')",cls:'badge-info'},
+      {icon:'📅',title:'Daily Issue Report',desc:"Today's fabric issue summary",action:"runReport('daily')",cls:'badge-warning'},
+      {icon:'📆',title:'Monthly Consumption',desc:'Month-wise fabric consumption',action:"runReport('monthly')",cls:'badge-success'},
+      {icon:'🏭',title:'Vendor-wise Report',desc:'Inward receipts by vendor',action:"runReport('vendor')",cls:'badge-primary'},
+      {icon:'🏷️',title:'Article-wise Report',desc:'Consumption by article/design',action:"runReport('article')",cls:'badge-orange'},
+      {icon:'↩️',title:'Returns Report',desc:'All stock returns history',action:"runReport('returns')",cls:'badge-danger'},
+    ].map(r=>`<div class="card cursor-pointer" onclick="${r.action}" style="transition:transform .2s" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''">
+      <div class="card-body" style="text-align:center;padding:28px 20px">
+        <div style="font-size:36px;margin-bottom:10px">${r.icon}</div>
+        <div class="fw-bold fs-lg mb-1">${r.title}</div>
+        <div class="fs-sm text-muted">${r.desc}</div>
+        <div class="mt-1"><span class="badge ${r.cls}">Generate →</span></div>
+      </div>
+    </div>`).join('')}
+  </div>
+  <div id="reportOutput"></div>`;
+}
+
+async function runReport(type) {
+  showLoading('Generating report...'); let res,html='';
+  try {
+    if(type==='stock'){
+      res=await callAPI('getInventory',{}); const items=res.data||[];
+      html=`<div class="card"><div class="card-header"><span class="card-title">📋 Current Stock Report</span>
+        <div style="display:flex;gap:8px"><button class="btn btn-sm btn-outline" onclick="exportTableToCSV('reportTable','StockReport')">⬇ CSV</button><button class="btn btn-sm btn-outline" onclick="window.print()">🖨️ Print</button></div></div>
+        <div class="table-wrap"><table class="table" id="reportTable">
+          <thead><tr><th>Inv ID</th><th>Article</th><th>Fabric</th><th>Color</th><th>Width</th><th>Vendor</th><th>Current Stock</th><th>Reorder</th><th>Unit</th><th>Status</th></tr></thead>
+          <tbody>${items.map(i=>`<tr><td class="mono fs-sm">${i.Inventory_ID}</td><td class="fs-sm">${i.Article_Number||'—'}</td>
+            <td>${i.Fabric_Name}</td><td>${i.Color}</td><td class="fs-sm">${i.Width}</td><td class="fs-sm">${i.Vendor_Name}</td>
+            <td class="fw-bold ${parseFloat(i.Current_Stock)<=parseFloat(i.Reorder_Level)?'text-danger':''}">${fmtNum(i.Current_Stock)}</td>
+            <td class="fs-sm">${fmtNum(i.Reorder_Level)}</td><td class="fs-sm">${i.Unit}</td>
+            <td>${parseFloat(i.Current_Stock)<=parseFloat(i.Reorder_Level)?'<span class="badge badge-danger">LOW</span>':'<span class="badge badge-success">OK</span>'}</td></tr>`).join('')}</tbody>
+        </table></div></div>`;
+    } else if(type==='daily'){
+      res=await callAPI('getDailyIssueReport',{date:new Date().toISOString().split('T')[0]}); const d=res.data;
+      html=`<div class="card"><div class="card-header"><span class="card-title">📅 Daily Issue Report — ${d.date}</span><button class="btn btn-sm btn-outline" onclick="window.print()">🖨️ Print</button></div>
+        <div class="card-body"><div class="quick-stats">
+          <div class="qs"><div class="qs-val">${d.totalIssues}</div><div class="qs-label">Total Issues</div></div>
+          <div class="qs"><div class="qs-val">${fmtNum(d.totalQty)}</div><div class="qs-label">Total Qty (m)</div></div>
+          <div class="qs"><div class="qs-val">${d.byDepartment.length}</div><div class="qs-label">Departments</div></div>
+        </div><hr class="divider"/>
+        ${d.byDepartment.map(dept=>`<div class="mb-2"><div class="fw-bold mb-1"><span class="badge badge-info">${dept.department}</span> — ${fmtNum(dept.totalQty)} m</div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>Issue ID</th><th>Fabric</th><th>Color</th><th>Qty</th><th>PO</th></tr></thead>
+          <tbody>${dept.items.map(i=>`<tr><td class="mono">${i.Issue_ID}</td><td>${i.Fabric_Name}</td><td>${i.Color}</td><td class="fw-bold">${fmtNum(i.Issue_Qty)}</td><td class="mono fs-sm">${i.Production_Order||'—'}</td></tr>`).join('')}</tbody></table></div></div>`).join('')}
+        ${d.byDepartment.length===0?'<div class="table-empty">No issues today</div>':''}
+        </div></div>`;
+    } else if(type==='vendor'){
+      res=await callAPI('getVendorReport',{}); const vendors=res.data||[];
+      html=`<div class="card"><div class="card-header"><span class="card-title">🏭 Vendor-wise Inward Report</span><button class="btn btn-sm btn-outline" onclick="exportTableToCSV('vendorReportTable','VendorReport')">⬇ CSV</button></div>
+        <div class="table-wrap"><table class="table" id="vendorReportTable"><thead><tr><th>Vendor</th><th>Total Received</th><th>GRN Count</th><th>Articles</th></tr></thead>
+        <tbody>${vendors.map(v=>`<tr><td class="fw-bold">${v.vendor}</td><td>${fmtNum(v.totalReceived)} m</td><td>${v.grnCount}</td><td class="fs-sm">${(v.articles||[]).filter(Boolean).join(', ')||'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
+    } else if(type==='article'){
+      res=await callAPI('getArticleReport',{}); const articles=res.data||[];
+      html=`<div class="card"><div class="card-header"><span class="card-title">🏷️ Article-wise Report</span><button class="btn btn-sm btn-outline" onclick="exportTableToCSV('artReportTable','ArticleReport')">⬇ CSV</button></div>
+        <div class="table-wrap"><table class="table" id="artReportTable"><thead><tr><th>Article</th><th>Fabric</th><th>Color</th><th>Vendor</th><th>Current Stock</th><th>Total Issued</th><th>Issue Count</th></tr></thead>
+        <tbody>${articles.map(a=>`<tr><td class="fs-sm">${a.Article_Number||'—'}</td><td>${a.Fabric_Name}</td><td>${a.Color}</td><td class="fs-sm">${a.Vendor_Name}</td><td class="fw-bold">${fmtNum(a.Current_Stock)} ${a.Unit}</td><td class="text-danger fw-bold">${fmtNum(a.Total_Issued)}</td><td>${a.Issue_Count}</td></tr>`).join('')}</tbody></table></div></div>`;
+    } else if(type==='monthly'){
+      const now=new Date(); res=await callAPI('getMonthlyConsumption',{month:now.getMonth(),year:now.getFullYear()}); const d=res.data;
+      html=`<div class="card"><div class="card-header"><span class="card-title">📆 Monthly Consumption — ${d.month}</span></div>
+        <div class="card-body"><div class="quick-stats mb-2">
+          <div class="qs"><div class="qs-val">${fmtNum(d.totalQty)}</div><div class="qs-label">Total Issued (m)</div></div>
+          <div class="qs"><div class="qs-val">${d.transactions.length}</div><div class="qs-label">Transactions</div></div>
+          <div class="qs"><div class="qs-val">${d.byArticle.length}</div><div class="qs-label">Unique Articles</div></div>
+        </div><div class="table-wrap"><table class="table"><thead><tr><th>Article</th><th>Fabric</th><th>Color</th><th>Total Issued</th><th>Transactions</th></tr></thead>
+        <tbody>${d.byArticle.map(a=>`<tr><td class="fs-sm">${a.article||'—'}</td><td>${a.fabric}</td><td>${a.color}</td><td class="fw-bold">${fmtNum(a.totalQty)}</td><td>${a.txnCount}</td></tr>`).join('')}
+        ${d.byArticle.length===0?'<tr><td colspan="5" class="table-empty">No issues this month</td></tr>':''}</tbody></table></div></div></div>`;
+    } else if(type==='returns'){
+      res=await callAPI('getReturns',{}); const returns=res.data||[];
+      html=`<div class="card"><div class="card-header"><span class="card-title">↩️ Returns Report</span><button class="btn btn-sm btn-outline" onclick="exportTableToCSV('retReportTable','ReturnsReport')">⬇ CSV</button></div>
+        <div class="table-wrap"><table class="table" id="retReportTable"><thead><tr><th>Return ID</th><th>Issue ID</th><th>Fabric</th><th>Color</th><th>Return Qty</th><th>Reason</th><th>Date</th></tr></thead>
+        <tbody>${returns.map(r=>`<tr><td class="mono">${r.Return_ID}</td><td class="mono fs-sm">${r.Issue_ID}</td><td>${r.Fabric_Name}</td><td>${r.Color}</td><td class="text-success fw-bold">+${fmtNum(r.Return_Qty)}</td><td class="fs-sm">${r.Reason||'—'}</td><td class="fs-sm">${fmtDate(r.Returned_At)}</td></tr>`).join('')}
+        ${returns.length===0?'<tr><td colspan="7" class="table-empty">No returns</td></tr>':''}</tbody></table></div></div>`;
+    }
+    document.getElementById('reportOutput').innerHTML=html;
+  }catch(e){toast('Report error: '+e.message,'error');}
+  finally{hideLoading();}
+}
+
+// ── STOCK LEDGER ──────────────────────────────────────────────
+async function loadStockLedger() {
+  const invRes=await callAPI('getInventory',{}); state.inventory=invRes.data||[];
+  const invOpts=state.inventory.map(i=>`<option value="${i.Inventory_ID}">${i.Inventory_ID} | ${i.Fabric_Name} | ${i.Color} | ${i.Article_Number||''}</option>`).join('');
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">📒 Stock Ledger</div><div class="page-sub">Complete fabric movement history</div></div>
+  </div>
+  <div class="filters-bar">
+    <div class="form-group" style="min-width:260px"><div class="form-label">Inventory Item</div>
+      <select class="form-control" id="ledgerInvFilter"><option value="">All Items</option>${invOpts}</select></div>
+    <div class="form-group"><div class="form-label">Date From</div><input class="form-control" id="ledgerFrom" type="date"/></div>
+    <div class="form-group"><div class="form-label">Date To</div><input class="form-control" id="ledgerTo" type="date"/></div>
+    <button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="generateLedger()">Generate</button>
+    <button class="btn btn-outline btn-sm" style="align-self:flex-end" onclick="exportTableToCSV('ledgerTable','StockLedger')">⬇ Export</button>
+  </div>
+  <div class="card"><div class="table-wrap">
+    <table class="table" id="ledgerTable">
+      <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Fabric</th><th>Color</th><th>IN</th><th>OUT</th><th>Balance</th><th>Dept/Vendor</th></tr></thead>
+      <tbody id="ledgerBody"><tr><td colspan="9" class="table-empty">Select filters and click Generate</td></tr></tbody>
+    </table>
+  </div></div>`;
+}
+
+async function generateLedger() {
+  const invId=document.getElementById('ledgerInvFilter').value;
+  const dateFrom=document.getElementById('ledgerFrom').value;
+  const dateTo=document.getElementById('ledgerTo').value;
+  showLoading('Generating ledger...');
+  const res=await callAPI('getStockLedger',{inventoryId:invId,dateFrom,dateTo});
+  hideLoading();
+  const txns=res.data||[];
+  document.getElementById('ledgerBody').innerHTML=txns.length?
+    txns.map(t=>`<tr>
+      <td class="fs-sm">${fmtDateTime(t.date)}</td>
+      <td><span class="ledger-type ${t.type.toLowerCase()}">${t.type}</span></td>
+      <td class="mono fs-sm">${t.ref}</td><td>${t.fabric}</td><td>${t.color}</td>
+      <td class="text-success fw-bold">${t.in>0?'+'+fmtNum(t.in):'—'}</td>
+      <td class="text-danger fw-bold">${t.out>0?'-'+fmtNum(t.out):'—'}</td>
+      <td class="fw-bold">${fmtNum(t.balance)}</td>
+      <td class="fs-sm">${t.vendor||t.dept||'—'}</td>
+    </tr>`).join(''):
+    '<tr><td colspan="9" class="table-empty">No transactions found</td></tr>';
+}
+
+// ── ACTIVITY LOGS ─────────────────────────────────────────────
+async function loadActivityLogs() {
+  const res=await callAPI('getActivityLogs',{}); const logs=res.data||[];
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">🔍 Activity Logs</div><div class="page-sub">Complete audit trail — last 100 actions</div></div>
+    <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('logsTable','ActivityLogs')">⬇ Export</button>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="table" id="logsTable">
+    <thead><tr><th>Timestamp</th><th>User</th><th>Role</th><th>Action</th><th>Module</th><th>Record ID</th><th>Details</th></tr></thead>
+    <tbody>${logs.map(l=>`<tr>
+      <td class="fs-sm mono">${fmtDateTime(l.Timestamp)}</td>
+      <td class="fs-sm fw-600">${l.User}</td>
+      <td><span class="badge badge-primary">${l.Role||'—'}</span></td>
+      <td><span class="badge ${l.Action==='ERROR'?'badge-danger':l.Action==='CREATE'||l.Action==='ADD_USER'?'badge-success':l.Action==='ISSUE'?'badge-warning':l.Action==='LOGIN'?'badge-teal':l.Action==='DEACTIVATE_USER'?'badge-danger':l.Action==='REACTIVATE_USER'?'badge-success':'badge-info'}">${l.Action}</span></td>
+      <td class="fs-sm">${l.Module}</td>
+      <td class="mono fs-sm">${l.Record_ID}</td>
+      <td class="fs-sm text-muted ellipsis" style="max-width:180px">${l.Details}</td>
+    </tr>`).join('')}
+    ${logs.length===0?'<tr><td colspan="7" class="table-empty">No activity logs</td></tr>':''}</tbody>
+  </table></div></div>`;
+}
+
+// ── CHANGE PASSWORD ───────────────────────────────────────────
+function loadChangePassword() {
+  const session=getSession();
+  document.getElementById('pageContent').innerHTML=`
+  <div class="page-header">
+    <div><div class="page-title">🔑 Change Password</div>
+      <div class="page-sub">Logged in as ${session.displayName||session.username} (${session.role})</div></div>
+  </div>
+  <div style="max-width:440px">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Update Your Password</span></div>
+      <div class="card-body">
+        <div class="form-group"><label class="form-label required">Current Password</label><input class="form-control" type="password" id="cpCurrent" autocomplete="current-password"/></div>
+        <div class="form-group"><label class="form-label required">New Password</label><input class="form-control" type="password" id="cpNew" autocomplete="new-password"/><div class="form-hint">Minimum 6 characters</div></div>
+        <div class="form-group"><label class="form-label required">Confirm New Password</label><input class="form-control" type="password" id="cpConfirm" autocomplete="new-password"/></div>
+        <div id="cpError" class="danger-box mb-2" style="display:none"></div>
+        <button class="btn btn-primary w-100" onclick="submitChangePassword()">🔑 Update Password</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function submitChangePassword() {
+  const cur=document.getElementById('cpCurrent').value;
+  const newPw=document.getElementById('cpNew').value;
+  const confirm=document.getElementById('cpConfirm').value;
+  const errEl=document.getElementById('cpError');
+  errEl.style.display='none';
+  if(!cur||!newPw||!confirm){errEl.textContent='All fields are required.';errEl.style.display='block';return;}
+  if(newPw!==confirm){errEl.textContent='Passwords do not match.';errEl.style.display='block';return;}
+  if(newPw.length<6){errEl.textContent='Password must be at least 6 characters.';errEl.style.display='block';return;}
+  showLoading('Updating...');
+  try{
+    const res=await callAPI('changePassword',{currentPassword:cur,newPassword:newPw,confirmPassword:confirm});
+    if(res.success){toast('Password updated! Please log in again.','success',3000);['cpCurrent','cpNew','cpConfirm'].forEach(id=>document.getElementById(id).value='');}
+    else{errEl.textContent=res.error||'Failed.';errEl.style.display='block';}
+  }catch(e){errEl.textContent=e.message;errEl.style.display='block';}
+  finally{hideLoading();}
+}
+
+// ============================================================
+// USER MANAGEMENT — ADMIN ONLY
+// ============================================================
+
+async function loadUserManagement() {
+  if (getRole() !== 'Admin') {
+    document.getElementById('pageContent').innerHTML = `
+      <div class="page-header"><div><div class="page-title">👥 User Management</div></div></div>
+      <div class="danger-box">⛔ Access denied. This page is restricted to Admin users only.</div>`;
+    return;
+  }
+
+  showLoading('Loading users...');
+  const res = await callAPI('getUsers');
+  hideLoading();
+  const users = res.success ? (res.data || []) : [];
+
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">👥 User Management</div>
+      <div class="page-sub">${users.length} registered users · Admin access only</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadUserManagement()">🔄 Refresh</button>
+      <button class="btn btn-primary" onclick="showAddUserModal()" style="font-size:8px !important;">+ Add User</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+    ${['Admin','Manager','EntryOP','User','PC'].map(role => {
+      const count = users.filter(u => u.role === role).length;
+      const active = users.filter(u => u.role === role && u.active).length;
+      const colors = {Admin:'#FF8608',Manager:'#006644',EntryOP:'#E8027D',User:'#750071',PC:'#e53e3e'};
+      return `<div style="background:var(--bg-surface);border:1px solid var(--border2);border-radius:10px;padding:10px 16px;text-align:center;min-width:100px;border-top:4px solid ${colors[role]};">
+        <div style="font-size:1.6rem;font-weight:700;color:${colors[role]}">${count}</div>
+        <div style="font-size:0.73rem;font-weight:700;color:var(--blue);margin-top:2px">${role}</div>
+        <div style="font-size:0.68rem;color:var(--darkpink)">${active} active</div>
+      </div>`;
+    }).join('')}
+    <div style="background:var(--bg-surface);border:1px solid var(--border2);border-radius:10px;padding:10px 16px;text-align:center;min-width:100px;border-top:4px solid var(--dgreen);">
+      <div style="font-size:1.8rem;font-weight:700;color:var(--dgreen)">${users.filter(u=>u.active).length}</div>
+      <div style="font-size:0.73rem;font-weight:700;color:var(--blue);margin-top:2px">TOTAL</div>
+      <div style="font-size:0.68rem;color:var(--darkpink)">${users.filter(u=>!u.active).length} inactive</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">All Users</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-control" style="width:200px;padding:6px 10px;font-size:0.8rem"
+          id="userSearchInput" placeholder="Search users..." oninput="filterUsersTable()" />
+        <select class="form-control" style="width:130px;padding:6px 10px;font-size:0.8rem"
+          id="userRoleFilter" onchange="filterUsersTable()">
+          <option value="">All Roles</option>
+          ${['Admin','Manager','EntryOP','User','PC'].map(r=>`<option>${r}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="usersTable">
+        <thead><tr>
+          <th>Username</th><th>Display Name</th><th>Role</th>
+          <th>Status</th><th>Created</th><th>Last Updated</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="usersTableBody">${renderUserRows(users)}</tbody>
+      </table>
+    </div>
+  </div>`;
+
+  state._allUsers = users;
+}
+
+function renderUserRows(users) {
+  if (!users || !users.length)
+    return '<tr><td colspan="7" class="table-empty">No users found</td></tr>';
+
+  const roleColors = {Admin:'#FF8608',Manager:'#0e9f6e',EntryOP:'#3182ce',User:'#9f7aea',PC:'#e53e3e'};
+  const session    = getSession();
+
+  return users.map(u => {
+    const isMe    = u.username === session.username;
+    const color   = roleColors[u.role] || '#718096';
+    const initial = (u.displayName || u.username)[0].toUpperCase();
+
+    return `<tr style="${!u.active?'opacity:0.55':''}">
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:30px;height:30px;border-radius:50%;background:${color};color:#fff;font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${initial}</div>
+          <div>
+            <div class="fw-600 fs-sm mono">${u.username}</div>
+            ${isMe?'<div style="font-size:.65rem;color:var(--primary)">● You</div>':''}
+          </div>
+        </div>
+      </td>
+      <td class="fw-500">${u.displayName}</td>
+      <td><span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${u.role}</span></td>
+      <td><span class="badge ${u.active?'badge-success':'badge-danger'}">${u.active?'Active':'Inactive'}</span></td>
+      <td class="fs-sm text-muted">${fmtDate(u.createdAt)}</td>
+      <td class="fs-sm text-muted">${u.updatedAt?fmtDate(u.updatedAt):'—'}</td>
+      <td>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-xs btn-outline" onclick="showEditUserModal('${u.username}','${u.displayName}','${u.role}')">✏️ Edit</button>
+          <button class="btn btn-xs btn-warning" onclick="showResetPasswordModal('${u.username}','${u.displayName}')">🔑 Reset PW</button>
+          ${u.active
+            ? `<button class="btn btn-xs btn-danger" onclick="confirmDeactivate('${u.username}','${u.displayName}')" ${isMe?'disabled title="Cannot deactivate yourself"':''}>🚫 Deactivate</button>`
+            : `<button class="btn btn-xs btn-success" onclick="confirmReactivate('${u.username}','${u.displayName}')">✅ Reactivate</button>`
+          }
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterUsersTable() {
+  const q    = (document.getElementById('userSearchInput').value||'').toLowerCase();
+  const role = document.getElementById('userRoleFilter').value;
+  const filtered = (state._allUsers||[]).filter(u => {
+    if (role && u.role !== role) return false;
+    if (q && !`${u.username} ${u.displayName}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById('usersTableBody').innerHTML = renderUserRows(filtered);
+}
+
+// ── ADD USER MODAL ────────────────────────────────────────────
+function showAddUserModal() {
+  openModal('Add New User', `
+    <div class="info-box mb-2">
+      Username must be 3–30 characters: lowercase letters, numbers, underscore only.<br/>
+      Password must be at least 6 characters.
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label required">Username</label>
+        <input class="form-control" id="au_username" placeholder="e.g. john_doe" autocapitalize="none" autocomplete="off"/>
+        <div class="form-hint">Lowercase, numbers, underscore. Cannot be changed later.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Display Name</label>
+        <input class="form-control" id="au_displayName" placeholder="e.g. John Doe"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Role</label>
+        <select class="form-control" id="au_role">
+          <option value="">-- Select Role --</option>
+          <option>Admin</option><option>Manager</option><option>EntryOP</option><option>User</option><option>PC</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Password</label>
+        <input class="form-control" type="password" id="au_password" placeholder="Min. 6 characters" autocomplete="new-password"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Confirm Password</label>
+        <input class="form-control" type="password" id="au_confirm" autocomplete="new-password"/>
+      </div>
+    </div>
+    <div id="auError" class="danger-box mt-1" style="display:none"></div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: '+ Create User', cls: 'btn-primary', action: submitAddUser }
+  ]);
+}
+
+async function submitAddUser() {
+  const username    = (document.getElementById('au_username').value||'').trim().toLowerCase();
+  const displayName = (document.getElementById('au_displayName').value||'').trim();
+  const role        = document.getElementById('au_role').value;
+  const password    = document.getElementById('au_password').value;
+  const confirm     = document.getElementById('au_confirm').value;
+  const errEl       = document.getElementById('auError');
+  errEl.style.display = 'none';
+
+  if (!username || !displayName || !role || !password || !confirm) {
+    errEl.textContent = 'All fields are required.'; errEl.style.display = 'block'; return;
+  }
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) {
+    errEl.textContent = 'Username: 3-30 chars, lowercase letters/numbers/underscore only.'; errEl.style.display = 'block'; return;
+  }
+  if (password.length < 6) {
+    errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return;
+  }
+  if (password !== confirm) {
+    errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return;
+  }
+
+  showLoading('Creating user...');
+  try {
+    const res = await callAPI('addUser', { username, displayName, role, password });
+    if (res.success) {
+      toast('User "' + username + '" created successfully!', 'success');
+      closeModal();
+      await loadUserManagement();
+    } else {
+      errEl.textContent = res.error || 'Failed to create user.';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  } finally {
+    hideLoading();
+  }
+}
+
+// ── EDIT USER MODAL ───────────────────────────────────────────
+function showEditUserModal(username, displayName, role) {
+  const session = getSession();
+  const isMe    = username === session.username;
+  openModal('Edit User: ' + username, `
+    <div class="info-box mb-2">
+      You can update the display name and role.<br/>
+      <strong>Note:</strong> Changing a user's role will immediately terminate all their active sessions — they will need to log in again.
+      ${isMe ? '<br/><span style="color:var(--warning-light)">⚠️ You cannot change your own role.</span>' : ''}
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-control" value="${username}" disabled/>
+        <div class="form-hint">Username cannot be changed.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Display Name</label>
+        <input class="form-control" id="eu_displayName" value="${displayName}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Role</label>
+        <select class="form-control" id="eu_role" ${isMe?'disabled':''}>
+          ${['Admin','Manager','EntryOP','User','PC'].map(r=>`<option value="${r}" ${r===role?'selected':''}>${r}</option>`).join('')}
+        </select>
+        ${isMe?'<div class="form-hint">Cannot change your own role.</div>':''}
+      </div>
+    </div>
+    <div id="euError" class="danger-box mt-1" style="display:none"></div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: '✓ Save Changes', cls: 'btn-primary', action: async () => {
+      const newDisplayName = (document.getElementById('eu_displayName').value||'').trim();
+      const newRole        = isMe ? role : document.getElementById('eu_role').value;
+      const errEl          = document.getElementById('euError');
+      errEl.style.display  = 'none';
+
+      if (!newDisplayName) {
+        errEl.textContent = 'Display name is required.'; errEl.style.display = 'block'; return;
+      }
+
+      showLoading('Saving...');
+      try {
+        const res = await callAPI('updateUser', { username, displayName: newDisplayName, role: newRole });
+        if (res.success) {
+          toast('User updated!', 'success');
+          closeModal();
+          await loadUserManagement();
+        } else {
+          errEl.textContent = res.error || 'Failed to update.'; errEl.style.display = 'block';
+        }
+      } catch(e) {
+        errEl.textContent = e.message; errEl.style.display = 'block';
+      } finally {
+        hideLoading();
+      }
+    }}
+  ]);
+}
+
+// ── RESET PASSWORD MODAL ─────────────────────────────────────
+function showResetPasswordModal(username, displayName) {
+  openModal('Reset Password: ' + username, `
+    <div class="warn-box mb-2">
+      ⚠️ You are resetting the password for <strong>${displayName}</strong> (${username}).<br/>
+      Their current password will be replaced immediately and all active sessions will be terminated.<br/>
+      Share the new password with them securely.
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label required">New Password</label>
+        <input class="form-control" type="password" id="rp_new" placeholder="Min. 6 characters" autocomplete="new-password"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Confirm Password</label>
+        <input class="form-control" type="password" id="rp_confirm" autocomplete="new-password"/>
+      </div>
+    </div>
+    <div id="rpError" class="danger-box mt-1" style="display:none"></div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: '🔑 Reset Password', cls: 'btn-warning', action: async () => {
+      const newPassword     = document.getElementById('rp_new').value;
+      const confirmPassword = document.getElementById('rp_confirm').value;
+      const errEl           = document.getElementById('rpError');
+      errEl.style.display   = 'none';
+
+      if (!newPassword || newPassword.length < 6) {
+        errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return;
+      }
+      if (newPassword !== confirmPassword) {
+        errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return;
+      }
+
+      showLoading('Resetting password...');
+      try {
+        const res = await callAPI('adminResetPassword', { username, newPassword, confirmPassword });
+        if (res.success) {
+          toast('Password reset for "' + username + '". Their sessions have been terminated.', 'success', 5000);
+          closeModal();
+        } else {
+          errEl.textContent = res.error || 'Failed to reset.'; errEl.style.display = 'block';
+        }
+      } catch(e) {
+        errEl.textContent = e.message; errEl.style.display = 'block';
+      } finally {
+        hideLoading();
+      }
+    }}
+  ]);
+}
+
+// ── DEACTIVATE CONFIRM ────────────────────────────────────────
+function confirmDeactivate(username, displayName) {
+  openModal('Deactivate User', `
+    <div class="danger-box mb-2">
+      Are you sure you want to deactivate <strong>${displayName}</strong> (${username})?<br/><br/>
+      • They will be immediately logged out of all devices<br/>
+      • They will not be able to log in until reactivated<br/>
+      • All their data and activity logs are preserved<br/>
+      • You can reactivate them at any time
+    </div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: '🚫 Yes, Deactivate', cls: 'btn-danger', action: async () => {
+      showLoading('Deactivating...');
+      try {
+        const res = await callAPI('deactivateUser', { username });
+        if (res.success) {
+          toast('"' + username + '" deactivated. All sessions terminated.', 'warning', 5000);
+          closeModal();
+          await loadUserManagement();
+        } else {
+          toast('Error: ' + res.error, 'error');
+          closeModal();
+        }
+      } catch(e) { toast('Error: ' + e.message, 'error'); closeModal(); }
+      finally { hideLoading(); }
+    }}
+  ]);
+}
+
+// ── REACTIVATE CONFIRM ────────────────────────────────────────
+function confirmReactivate(username, displayName) {
+  openModal('Reactivate User', `
+    <div class="success-box mb-2">
+      Reactivate <strong>${displayName}</strong> (${username})?<br/><br/>
+      They will be able to log in again immediately with their existing password.
+    </div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: '✅ Yes, Reactivate', cls: 'btn-success', action: async () => {
+      showLoading('Reactivating...');
+      try {
+        const res = await callAPI('reactivateUser', { username });
+        if (res.success) {
+          toast('"' + username + '" reactivated successfully!', 'success');
+          closeModal();
+          await loadUserManagement();
+        } else {
+          toast('Error: ' + res.error, 'error');
+          closeModal();
+        }
+      } catch(e) { toast('Error: ' + e.message, 'error'); closeModal(); }
+      finally { hideLoading(); }
+    }}
+  ]);
+}
+
+// ============================================================
+// SEARCH
+// ============================================================
+let searchTimer;
+async function handleSearch(query) {
+  clearTimeout(searchTimer);
+  const el=document.getElementById('searchResults');
+  if(!query||query.length<2){el.style.display='none';return;}
+  searchTimer=setTimeout(async()=>{
+    try{
+      const res=await callAPI('search',{query}); const results=res.data||[];
+      if(!results.length){el.style.display='none';return;}
+      el.innerHTML=results.map(r=>`<div class="search-result-item" onclick="handleSearchClick('${r.type}','${r.id}')">
+        <div class="result-type">${r.type}</div><div class="result-label">${r.label}</div><div class="result-meta">${r.meta}</div>
+      </div>`).join('');
+      el.style.display='block';
+    }catch(e){}
+  },380);
+}
+
+function handleSearchClick(type,id) {
+  document.getElementById('searchResults').style.display='none';
+  document.getElementById('globalSearch').value='';
+  if(type==='PurchaseOrder'){showPage('purchase-orders');setTimeout(()=>viewPO(id),600);}
+  if(type==='Inventory'){showPage('inventory');setTimeout(()=>viewInventoryItem(id),600);}
+}
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.topbar-search')) document.getElementById('searchResults').style.display='none';
+});
+
+// ── SIDEBAR ───────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb=document.getElementById('sidebar');
+  const mw=document.getElementById('mainWrapper');
+  if(window.innerWidth<=900){
+    sb.classList.toggle('open');
+    let overlay=document.getElementById('sidebarOverlay');
+    if(!overlay){overlay=document.createElement('div');overlay.id='sidebarOverlay';overlay.className='sidebar-overlay';overlay.onclick=closeMobileSidebar;document.body.appendChild(overlay);}
+    overlay.classList.toggle('show',sb.classList.contains('open'));
+  } else {
+    sb.classList.toggle('collapsed');
+    mw.classList.toggle('expanded');
+  }
+}
+
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  const overlay=document.getElementById('sidebarOverlay');
+  if(overlay) overlay.classList.remove('show');
+}
+
+// ── MODAL ─────────────────────────────────────────────────────
+function openModal(title, body, buttons) {
+  document.getElementById('modalTitle').textContent=title;
+  document.getElementById('modalBody').innerHTML=body;
+  const footer=document.getElementById('modalFooter');
+  footer.innerHTML=(buttons||[]).map((b,i)=>`<button class="btn ${b.cls}" id="modalBtn${i}">${b.label}</button>`).join('');
+  (buttons||[]).forEach((b,i)=>{const el=document.getElementById('modalBtn'+i);if(el)el.addEventListener('click',b.action);});
+  document.getElementById('modalOverlay').classList.add('open');
+  setTimeout(()=>{const f=document.querySelector('#modalBody input:not([disabled]),#modalBody select:not([disabled])');if(f)f.focus();},120);
+}
+
+function closeModal(e) {
+  if(e&&e.target!==document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') document.getElementById('modalOverlay').classList.remove('open');
+});
+
+// ── TOAST ─────────────────────────────────────────────────────
+function toast(message,type='info',duration=4000) {
+  const icons={success:'✅',error:'❌',warning:'⚠️',info:'ℹ️'};
+  const container=document.getElementById('toastContainer');
+  const div=document.createElement('div');
+  div.className='toast '+type;
+  div.innerHTML=`<span class="toast-icon">${icons[type]||'ℹ️'}</span><span class="toast-text">${message}</span><span class="toast-close" onclick="this.parentElement.remove()">✕</span>`;
+  container.appendChild(div);
+  setTimeout(()=>{if(div.parentElement)div.remove();},duration);
+}
+
+// ── LOADING ───────────────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById('loadingText').textContent=msg||'Loading...';
+  document.getElementById('loadingOverlay').classList.add('show');
+}
+function hideLoading() { document.getElementById('loadingOverlay').classList.remove('show'); }
+
+// ── FORMATTERS ────────────────────────────────────────────────
+function fmtNum(n){return isNaN(parseFloat(n))?'0':parseFloat(n).toLocaleString('en-IN',{maximumFractionDigits:2});}
+function fmtDate(d){if(!d)return '—';try{return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return String(d);}}
+function fmtDateTime(d){if(!d)return '—';try{return new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}}
+
+// ── UTILS ─────────────────────────────────────────────────────
+function infoRow(label,value){
+  return `<div class="form-group"><div class="form-label">${label}</div>
+    <div style="padding:8px 10px;background:var(--bg-surface3);border-radius:var(--radius);font-size:.875rem;color:var(--text-primary)">${value||'—'}</div></div>`;
+}
+
+function exportTableToCSV(tableId,filename){
+  const table=document.getElementById(tableId);
+  if(!table){toast('Table not found','warning');return;}
+  const rows=Array.from(table.querySelectorAll('tr'));
+  const csv=rows.map(row=>Array.from(row.querySelectorAll('th,td')).map(cell=>'"'+cell.innerText.replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename+'_'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+  toast('CSV exported!','success');
+}
+</script>
