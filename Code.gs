@@ -1,19 +1,12 @@
 // ============================================================
-// INVENTORY ERP — GOOGLE APPS SCRIPT BACKEND
 // File: Code.gs — Main Entry Point & Router
-// Version: 2.2 | Bug-Fixed
-//
-// FIXES v2.2:
-//   • error() helper: first arg is always the user-facing message.
-//     PERMISSION_DENIED was previously passed as first arg — now
-//     kept consistent: error(message, code) so frontend always
-//     reads res.error for the display message.
-//   • logActivity: null-safe fallback when Sheets is unreachable
-//   • dispatch: catches sheet init errors that previously surfaced
-//     as "Server error" even on login
+// FIXED:
+//  • XFrameOptionsMode changed to SAMEORIGIN (clickjacking fix)
+//  • requireAdmin: error() arg order fixed — message first, code second
+//  • dispatch: payload parse guard handles null safely
+//  • refreshDashboardCache wrapped in full try/catch
 // ============================================================
 
-// ── SPREADSHEET CONFIG ──────────────────────────────────────
 const SS_ID = '1GliIhNyi7cZrv9UU5mhkJRR1MeLCwSyDT-cNcHQBcNw';
 
 const SHEETS = {
@@ -28,28 +21,25 @@ const SHEETS = {
   DASHBOARD_DATA   : 'Dashboard_Data',
 };
 
-// ── PUBLIC ACTIONS (no session token required) ───────────────
 const PUBLIC_ACTIONS = ['login', 'validateToken'];
 
-// ── WEB APP ENTRY POINT ──────────────────────────────────────
+// FIX: SAMEORIGIN prevents clickjacking
 function doGet(e) {
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('Inventory ERP')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.SAMEORIGIN);
 }
 
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-// ── LOGIN PAGE HELPER ────────────────────────────────────────
 function getLoginPage() {
   return HtmlService.createHtmlOutputFromFile('login').getContent();
 }
 
-// ── SPREADSHEET ACCESSOR ─────────────────────────────────────
 function getSpreadsheet() {
   return SS_ID
     ? SpreadsheetApp.openById(SS_ID)
@@ -57,8 +47,8 @@ function getSpreadsheet() {
 }
 
 function getSheet(name) {
-  const ss    = getSpreadsheet();
-  let   sheet = ss.getSheetByName(name);
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
     initSheet(sheet, name);
@@ -66,7 +56,6 @@ function getSheet(name) {
   return sheet;
 }
 
-// ── SHEET INITIALIZER ────────────────────────────────────────
 function initSheet(sheet, name) {
   const headers = SHEET_HEADERS[name];
   if (!headers) return;
@@ -126,7 +115,7 @@ const SHEET_HEADERS = {
   ],
 };
 
-// ── ID GENERATORS ────────────────────────────────────────────
+// ── ID GENERATORS ─────────────────────────────────────────────
 function generateId(prefix) {
   const ts  = new Date().getTime().toString(36).toUpperCase();
   const rnd = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -139,13 +128,8 @@ function generateSequentialId(prefix, sheet) {
   return `${prefix}-${String(count).padStart(5, '0')}`;
 }
 
-// ── RESPONSE HELPERS ─────────────────────────────────────────
-// success(data, message) → JSON string
-// error(message, details) → JSON string
-//
-// IMPORTANT: error() first arg is ALWAYS the human-readable message.
-// The frontend reads res.error to display it. Keep this consistent
-// everywhere — never swap the argument order.
+// ── RESPONSE HELPERS ──────────────────────────────────────────
+// FIX: error(message, details) — message is ALWAYS first arg (user-facing text)
 function success(data, message) {
   return JSON.stringify({ success: true, data: data || null, message: message || 'OK' });
 }
@@ -154,9 +138,7 @@ function error(message, details) {
   return JSON.stringify({ success: false, error: message, details: details || null });
 }
 
-// ── ACTIVITY LOGGER ──────────────────────────────────────────
-// FIX v2.2: Full try/catch so sheet errors NEVER propagate up
-// and silently break transactions or logins.
+// ── ACTIVITY LOGGER ───────────────────────────────────────────
 function logActivity(action, module, recordId, details, callerUser, callerRole) {
   try {
     const sheet = getSheet(SHEETS.ACTIVITY_LOGS);
@@ -165,36 +147,31 @@ function logActivity(action, module, recordId, details, callerUser, callerRole) 
     sheet.appendRow([
       generateId('LOG'),
       new Date(),
-      user,
-      role,
-      action,
-      module,
+      user, role, action, module,
       recordId || '',
       JSON.stringify(details || {})
     ]);
   } catch (e) {
-    // Never break a transaction — log to Apps Script logger only
     Logger.log('logActivity FAILED (non-fatal): ' + e.message);
   }
 }
 
-// ── SETUP ALL SHEETS ─────────────────────────────────────────
+// ── SETUP ─────────────────────────────────────────────────────
 function setupAllSheets() {
   Object.keys(SHEETS).forEach(key => getSheet(SHEETS[key]));
   try { refreshDashboardCache(); } catch(e) {}
   return success(null, 'All sheets initialized successfully');
 }
 
-// ── DISPATCHER ───────────────────────────────────────────────
-// All frontend → backend calls route through here.
-// Step 1: allow public actions (login, validateToken) without a token.
-// Step 2: validate session token for all other actions.
-// Step 3: Admin-only actions are further guarded inside their functions.
+// ── DISPATCHER ────────────────────────────────────────────────
 function dispatch(action, payload) {
   try {
-    payload = typeof payload === 'string' ? JSON.parse(payload) : (payload || {});
+    // FIX: safe parse — handle null/undefined payload
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch(pe) { payload = {}; }
+    }
+    payload = payload || {};
 
-    // ── STEP 1: PUBLIC ACTIONS ────────────────────────────
     if (PUBLIC_ACTIONS.includes(action)) {
       switch (action) {
         case 'login'         : return loginUser(payload);
@@ -203,89 +180,59 @@ function dispatch(action, payload) {
       }
     }
 
-    // ── STEP 2: AUTHENTICATE ──────────────────────────────
     const token = payload._token;
-    if (!token)
-      return error('No session token. Please log in.', 'AUTH_REQUIRED');
+    if (!token) return error('No session token. Please log in.');
 
-    const authCheck = JSON.parse(validateSessionToken(token));
-    if (!authCheck.success)
-      return error('Session invalid. Please log in again.', 'AUTH_FAILED');
+    let authCheck;
+    try { authCheck = JSON.parse(validateSessionToken(token)); }
+    catch(e) { return error('Session validation failed. Please log in again.'); }
 
-    // caller = { username, displayName, role }
+    if (!authCheck.success) return error('Session invalid. Please log in again.');
+
     const caller = authCheck.data;
 
-    // ── STEP 3: ROUTE ─────────────────────────────────────
     switch (action) {
-
-      // ── Setup ────────────────────────────────────────────
-      case 'setup'               : return setupAllSheets();
-
-      // ── Auth ─────────────────────────────────────────────
-      case 'logout'              : return logoutUser(payload, caller);
-      case 'changePassword'      : return changePassword(payload, caller);
-
-      // ── User Management (Admin-only) ──────────────────────
-      case 'setupUsers'          : return setupUsers(payload, caller);
-      case 'getUsers'            : return getUsers(caller);
-      case 'addUser'             : return addUser(payload, caller);
-      case 'updateUser'          : return updateUser(payload, caller);
-      case 'deactivateUser'      : return deactivateUserAPI(payload, caller);
-      case 'reactivateUser'      : return reactivateUserAPI(payload, caller);
-      case 'adminResetPassword'  : return adminResetPassword(payload, caller);
-
-      // ── Purchase Orders ───────────────────────────────────
-      case 'createPO'            : return createPurchaseOrder(payload, caller);
-      case 'getPOs'              : return getPurchaseOrders(payload);
-      case 'getPOById'           : return getPOById(payload.id);
-      case 'updatePOStatus'      : return updatePOStatus(payload, caller);
-
-      // ── Fabric Receipts ───────────────────────────────────
-      case 'receivefabric'       : return receiveFabric(payload, caller);
-      case 'getReceipts'         : return getReceipts(payload);
-      case 'getReceiptsByPO'     : return getReceiptsByPO(payload.poNumber);
-
-      // ── Inventory ─────────────────────────────────────────
-      case 'getInventory'        : return getInventory(payload);
-      case 'getInventoryById'    : return getInventoryById(payload.id);
-      case 'getLowStock'         : return getLowStockAlerts();
-      case 'addInventoryItem'    : return addInventoryItem(payload, caller);
-
-      // ── Stock Issue ───────────────────────────────────────
-      case 'issueStock'          : return issueStock(payload, caller);
-      case 'getIssues'           : return getIssues(payload);
-      case 'getIssuesByInventory': return getIssuesByInventory(payload.inventoryId);
-
-      // ── Stock Returns ─────────────────────────────────────
-      case 'returnStock'         : return returnStock(payload, caller);
-      case 'getReturns'          : return getReturns(payload);
-
-      // ── Vendors ───────────────────────────────────────────
-      case 'getVendors'          : return getVendors();
-      case 'addVendor'           : return addVendor(payload, caller);
-
-      // ── Production Orders ─────────────────────────────────
-      case 'getProductionOrders' : return getProductionOrders();
-      case 'addProductionOrder'  : return addProductionOrder(payload, caller);
-
-      // ── Reports ───────────────────────────────────────────
+      case 'setup'                : return setupAllSheets();
+      case 'logout'               : return logoutUser(payload, caller);
+      case 'changePassword'       : return changePassword(payload, caller);
+      case 'setupUsers'           : return setupUsers(payload, caller);
+      case 'getUsers'             : return getUsers(caller);
+      case 'addUser'              : return addUser(payload, caller);
+      case 'updateUser'           : return updateUser(payload, caller);
+      case 'deactivateUser'       : return deactivateUserAPI(payload, caller);
+      case 'reactivateUser'       : return reactivateUserAPI(payload, caller);
+      case 'adminResetPassword'   : return adminResetPassword(payload, caller);
+      case 'createPO'             : return createPurchaseOrder(payload, caller);
+      case 'getPOs'               : return getPurchaseOrders(payload);
+      case 'getPOById'            : return getPOById(payload.id);
+      case 'updatePOStatus'       : return updatePOStatus(payload, caller);
+      case 'receivefabric'        : return receiveFabric(payload, caller);
+      case 'getReceipts'          : return getReceipts(payload);
+      case 'getReceiptsByPO'      : return getReceiptsByPO(payload.poNumber);
+      case 'getInventory'         : return getInventory(payload);
+      case 'getInventoryById'     : return getInventoryById(payload.id);
+      case 'getLowStock'          : return getLowStockAlerts();
+      case 'addInventoryItem'     : return addInventoryItem(payload, caller);
+      case 'issueStock'           : return issueStock(payload, caller);
+      case 'getIssues'            : return getIssues(payload);
+      case 'getIssuesByInventory' : return getIssuesByInventory(payload.inventoryId);
+      case 'returnStock'          : return returnStock(payload, caller);
+      case 'getReturns'           : return getReturns(payload);
+      case 'getVendors'           : return getVendors();
+      case 'addVendor'            : return addVendor(payload, caller);
+      case 'getProductionOrders'  : return getProductionOrders();
+      case 'addProductionOrder'   : return addProductionOrder(payload, caller);
       case 'getStockLedger'       : return getStockLedger(payload);
       case 'getDailyIssueReport'  : return getDailyIssueReport(payload);
       case 'getMonthlyConsumption': return getMonthlyConsumption(payload);
       case 'getVendorReport'      : return getVendorReport(payload);
       case 'getArticleReport'     : return getArticleReport(payload);
       case 'getFabricMovement'    : return getFabricMovement(payload);
-
-      // ── Dashboard ─────────────────────────────────────────
-      case 'getDashboard'        : return getDashboardData();
-      case 'getActivityLogs'     : return getActivityLogs(payload);
-
-      // ── Search ────────────────────────────────────────────
-      case 'search'              : return globalSearch(payload.query);
-
-      default: return error('Unknown action: ' + action);
+      case 'getDashboard'         : return getDashboardData();
+      case 'getActivityLogs'      : return getActivityLogs(payload);
+      case 'search'               : return globalSearch(payload.query);
+      default                     : return error('Unknown action: ' + action);
     }
-
   } catch (e) {
     Logger.log('dispatch ERROR — action: ' + action + ' | ' + e.message + '\n' + e.stack);
     try { logActivity('ERROR', 'dispatch', action, { error: e.message }); } catch(le) {}
