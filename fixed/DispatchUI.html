@@ -1,0 +1,200 @@
+<script>
+// ============================================================
+// DispatchUI.html — Dispatch Management (Sprint S9)
+// ============================================================
+
+function renderDispatch() {
+  setPageTitle('Dispatch');
+  document.getElementById('pageContent').innerHTML = `
+    <div class="page-header">
+      <div><h1 class="page-title">Dispatch</h1><p class="page-subtitle">Dispatch packed bundles to buyers</p></div>
+      <button class="btn btn-primary" onclick="openCreateDispatchModal()">+ New Dispatch</button>
+    </div>
+    <div id="dsp-summary" class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px"></div>
+    <div class="page-toolbar">
+      <div class="toolbar-left">
+        <input type="text" class="search-input" placeholder="Search dispatches…" oninput="filterTable('dsp-table',this.value)">
+        <select class="filter-select" id="dsp-so-filter" onchange="loadDispatches()">
+          <option value="">All Sales Orders</option>
+        </select>
+      </div>
+    </div>
+    <div id="dsp-table-wrap"><div class="loading-spinner"></div></div>
+  `;
+  var soSel = document.getElementById('dsp-so-filter');
+  ((ERP.dropdowns && ERP.dropdowns.salesOrders) || []).forEach(function(so) {
+    var opt = document.createElement('option');
+    opt.value = so.value; opt.textContent = so.label;
+    if (soSel) soSel.appendChild(opt);
+  });
+  loadDispatchSummary();
+  loadDispatches();
+}
+
+function loadDispatchSummary() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) return;
+      var d = res.data;
+      var wrap = document.getElementById('dsp-summary');
+      if (!wrap) return;
+      wrap.innerHTML = `
+        <div class="card"><div class="stat-icon" style="background:var(--blue-dim);color:var(--blue)">🚚</div>
+          <div class="stat-value">${d.totalDispatches}</div><div class="stat-label">Total Dispatches</div></div>
+        <div class="card"><div class="stat-icon" style="background:var(--green-dim);color:var(--green)">👕</div>
+          <div class="stat-value">${fmtNum(d.totalPieces)}</div><div class="stat-label">Total Pieces</div></div>
+        <div class="card"><div class="stat-icon" style="background:var(--purple-dim);color:var(--purple)">📅</div>
+          <div class="stat-value">${d.thisMonthPieces}</div><div class="stat-label">This Month Pcs</div></div>
+        <div class="card"><div class="stat-icon" style="background:var(--orange-dim);color:var(--orange)">📦</div>
+          <div class="stat-value">${d.pendingBundles}</div><div class="stat-label">Ready to Dispatch</div></div>
+      `;
+    })
+    .withFailureHandler(function() {})
+    .serverGetDispatchSummary(ERP.token);
+}
+
+function loadDispatches() {
+  var filters = {};
+  var soID = (document.getElementById('dsp-so-filter') || {}).value;
+  if (soID) filters.soID = soID;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      renderDispatchTable(res.data);
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverGetDispatches(ERP.token, filters);
+}
+
+function renderDispatchTable(rows) {
+  var wrap = document.getElementById('dsp-table-wrap');
+  if (!rows || rows.length === 0) {
+    wrap.innerHTML = '<div class="empty-state"><span class="empty-icon">🚚</span><p>No dispatches found. Create a new dispatch to begin.</p></div>';
+    return;
+  }
+  renderDataTable({
+    containerId: 'dsp-table-wrap', tableId: 'dsp-table',
+    columns: [
+      { label: 'Dispatch ID',  key: 'DispatchID',    render: function(v) { return '<code class="mono-sm">'+v+'</code>'; } },
+      { label: 'Date',         key: 'DispatchDate',  render: fmtDate },
+      { label: 'SO #',         key: 'SONumber' },
+      { label: 'Buyer',        key: 'BuyerName' },
+      { label: 'Pieces',       key: 'TotalPieces',   render: fmtNum },
+      { label: 'Vehicle',      key: 'VehicleNumber', render: function(v) { return escHtml(v||'—'); } },
+      { label: 'Status',       key: 'Status',        render: statusBadge },
+      { label: '',             key: '_a',            render: function(_, r) {
+        return '<button class="btn btn-xs btn-outline" onclick="viewDispatch(\''+r.DispatchID+'\')">View</button>';
+      }}
+    ], data: rows
+  });
+}
+
+function viewDispatch(dispatchID) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      var d = res.data;
+      var itemRows = (d.Items||[]).map(function(i) {
+        return '<tr><td>'+escHtml(i.ArticleName||i.ArticleID)+'</td><td>'+escHtml(i.Size)+'</td><td>'+escHtml(i.Color||'—')+'</td><td>'+escHtml(i.BundleID)+'</td><td>'+fmtNum(i.Qty)+'</td></tr>';
+      }).join('');
+      var body = `
+        <div class="detail-grid">
+          <div class="detail-item"><span class="detail-label">Dispatch ID</span><span class="detail-value mono-sm">${d.DispatchID}</span></div>
+          <div class="detail-item"><span class="detail-label">Date</span><span class="detail-value">${fmtDate(d.DispatchDate)}</span></div>
+          <div class="detail-item"><span class="detail-label">Sales Order</span><span class="detail-value">${escHtml(d.SONumber)}</span></div>
+          <div class="detail-item"><span class="detail-label">Buyer</span><span class="detail-value">${escHtml(d.BuyerName)}</span></div>
+          <div class="detail-item"><span class="detail-label">Total Pieces</span><span class="detail-value">${fmtNum(d.TotalPieces)}</span></div>
+          <div class="detail-item"><span class="detail-label">Vehicle #</span><span class="detail-value">${escHtml(d.VehicleNumber||'—')}</span></div>
+          <div class="detail-item"><span class="detail-label">Driver</span><span class="detail-value">${escHtml(d.DriverName||'—')}</span></div>
+          <div class="detail-item"><span class="detail-label">Driver Mobile</span><span class="detail-value">${escHtml(d.DriverMobile||'—')}</span></div>
+          <div class="detail-item"><span class="detail-label">Status</span><span class="detail-value">${statusBadge(d.Status)}</span></div>
+          <div class="detail-item"><span class="detail-label">Remarks</span><span class="detail-value">${escHtml(d.Remarks||'—')}</span></div>
+        </div>
+        <div class="section-divider">Bundles Dispatched (${(d.Items||[]).length})</div>
+        <div class="table-scroll"><table class="data-table"><thead><tr><th>Article</th><th>Size</th><th>Color</th><th>Bundle ID</th><th>Qty</th></tr></thead><tbody>${itemRows}</tbody></table></div>
+      `;
+      openModal('Dispatch — '+d.DispatchID, body, '<button class="btn btn-ghost" onclick="closeModal()">Close</button>', 'xl');
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverGetDispatchByID(ERP.token, dispatchID);
+}
+
+function openCreateDispatchModal() {
+  loadDropdowns(function() {
+    var sos = (ERP.dropdowns && ERP.dropdowns.salesOrders) || [];
+    var soOpts = sos.map(function(s) { return '<option value="'+s.value+'">'+escHtml(s.label)+'</option>'; }).join('');
+    var body = `
+      <div class="form-row">
+        <div class="form-group"><label class="form-label required">Sales Order</label>
+          <select id="dsp-so" class="form-control" onchange="loadReadyBundles()"><option value="">— Select SO —</option>${soOpts}</select></div>
+        <div class="form-group"><label class="form-label required">Dispatch Date</label>
+          <input type="date" id="dsp-date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Vehicle Number</label>
+          <input type="text" id="dsp-vehicle" class="form-control" placeholder="e.g. GJ01AB1234"></div>
+        <div class="form-group"><label class="form-label">Driver Name</label>
+          <input type="text" id="dsp-driver" class="form-control"></div>
+        <div class="form-group"><label class="form-label">Driver Mobile</label>
+          <input type="text" id="dsp-mobile" class="form-control"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Remarks</label>
+        <textarea id="dsp-remarks" class="form-control" rows="2"></textarea></div>
+      <div class="section-divider">Select Bundles to Dispatch</div>
+      <div id="dsp-bundles-wrap"><p class="text-muted text-sm">Select a Sales Order to see ready bundles.</p></div>
+    `;
+    var footer = `
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitDispatch()">Create Dispatch</button>
+    `;
+    openModal('New Dispatch', body, footer, 'xl');
+  });
+}
+
+function loadReadyBundles() {
+  var soID = document.getElementById('dsp-so').value;
+  var wrap = document.getElementById('dsp-bundles-wrap');
+  if (!soID) { wrap.innerHTML = '<p class="text-muted text-sm">Select a Sales Order.</p>'; return; }
+  wrap.innerHTML = '<div class="loading-spinner-sm"></div>';
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { wrap.innerHTML = '<p class="text-muted text-sm">'+escHtml(res.message)+'</p>'; return; }
+      var bundles = res.data;
+      if (!bundles || bundles.length === 0) {
+        wrap.innerHTML = '<div class="info-box">No ready bundles for this SO. Bundles must be Packing Done to dispatch.</div>'; return;
+      }
+      var rows = bundles.map(function(b) {
+        return '<label class="checkbox-row"><input type="checkbox" class="dsp-cb" value="'+b.BundleID+'" checked>'+
+          '<span><strong>#'+b.BundleNumber+'</strong> — '+escHtml(b.ArticleName)+' | Size: '+escHtml(b.Size)+' | Color: '+escHtml(b.Color||'—')+' | '+fmtNum(b.Pieces)+' pcs | '+escHtml(b.BarcodeValue)+'</span></label>';
+      }).join('');
+      wrap.innerHTML = '<label class="checkbox-row" style="font-weight:700"><input type="checkbox" id="dsp-sel-all" checked onchange="document.querySelectorAll(\'.dsp-cb\').forEach(function(c){c.checked=this.checked;}.bind(this))"><span>Select All ('+bundles.length+' bundles ready)</span></label>'+rows;
+    })
+    .withFailureHandler(function(e) { wrap.innerHTML = '<p class="text-muted">Error: '+escHtml(e.message)+'</p>'; })
+    .serverGetReadyBundlesForDispatch(ERP.token, soID);
+}
+
+function submitDispatch() {
+  var soID     = document.getElementById('dsp-so').value;
+  var date     = document.getElementById('dsp-date').value;
+  var vehicle  = document.getElementById('dsp-vehicle').value;
+  var driver   = document.getElementById('dsp-driver').value;
+  var mobile   = document.getElementById('dsp-mobile').value;
+  var remarks  = document.getElementById('dsp-remarks').value;
+
+  if (!soID) { showToast('error','Error','Select a Sales Order'); return; }
+  if (!date) { showToast('error','Error','Dispatch date is required'); return; }
+
+  var bundleIDs = Array.from(document.querySelectorAll('.dsp-cb:checked')).map(function(c) { return c.value; });
+  if (bundleIDs.length === 0) { showToast('error','Error','Select at least one bundle'); return; }
+
+  var data = { SOID: soID, DispatchDate: date, VehicleNumber: vehicle, DriverName: driver, DriverMobile: mobile, Remarks: remarks, bundleIDs: bundleIDs };
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      showToast('success','Success','Dispatched '+bundleIDs.length+' bundles — '+res.data.dispatchID);
+      closeModal(); loadDispatches(); loadDispatchSummary();
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverCreateDispatch(ERP.token, data);
+}
+</script>

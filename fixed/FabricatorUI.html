@@ -1,0 +1,256 @@
+<script>
+// ============================================================
+// FabricatorUI.html — Fabricator Job Work (Sprint S8)
+// ============================================================
+
+function renderFabricator() {
+  setPageTitle('Fabricator Job Work');
+  document.getElementById('pageContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Fabricator Job Work</h1>
+        <p class="page-subtitle">Track fabric sent to and received from fabricators</p>
+      </div>
+      <button class="btn btn-primary" onclick="openCreateChallanModal()">+ New Challan Out</button>
+    </div>
+    <div id="fab-summary" class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px"></div>
+    <div class="page-toolbar">
+      <div class="toolbar-left">
+        <input type="text" class="search-input" placeholder="Search challans…" oninput="filterTable('fab-table',this.value)">
+        <select class="filter-select" id="fab-type-filter" onchange="loadFabricatorChallans()">
+          <option value="">All Types</option>
+          <option value="Out">Challan Out</option>
+          <option value="In">Challan In</option>
+        </select>
+        <select class="filter-select" id="fab-status-filter" onchange="loadFabricatorChallans()">
+          <option value="">All Statuses</option>
+          <option value="Open">Open</option>
+          <option value="Received">Received</option>
+          <option value="Closed">Closed</option>
+        </select>
+      </div>
+    </div>
+    <div id="fab-table-wrap"><div class="loading-spinner"></div></div>
+  `;
+  loadFabricatorSummary();
+  loadFabricatorChallans();
+}
+
+function loadFabricatorSummary() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) return;
+      var d = res.data;
+      var html = `
+        <div class="card"><div class="stat-icon" style="background:var(--orange-dim);color:var(--orange)">📤</div>
+          <div class="stat-value">${d.totalOpen}</div><div class="stat-label">Open Challans</div></div>
+        <div class="card"><div class="stat-icon" style="background:var(--green-dim);color:var(--green)">📥</div>
+          <div class="stat-value">${d.totalReceived}</div><div class="stat-label">Received</div></div>
+        <div class="card"><div class="stat-icon" style="background:var(--blue-dim);color:var(--blue)">🏭</div>
+          <div class="stat-value">${Object.keys(d.byFabricator).length}</div><div class="stat-label">Fabricators Active</div></div>
+      `;
+      var wrap = document.getElementById('fab-summary');
+      if (wrap) wrap.innerHTML = html;
+    })
+    .withFailureHandler(function() {})
+    .serverGetFabricatorSummary(ERP.token);
+}
+
+function loadFabricatorChallans() {
+  var filters = {};
+  var type   = (document.getElementById('fab-type-filter')   || {}).value;
+  var status = (document.getElementById('fab-status-filter') || {}).value;
+  if (type)   filters.type   = type;
+  if (status) filters.status = status;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      renderFabricatorTable(res.data);
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverGetFabricatorChallans(ERP.token, filters);
+}
+
+function renderFabricatorTable(rows) {
+  var wrap = document.getElementById('fab-table-wrap');
+  if (!rows || rows.length === 0) {
+    wrap.innerHTML = '<div class="empty-state"><span class="empty-icon">🏭</span><p>No challans found. Create a Challan Out to start.</p></div>';
+    return;
+  }
+  renderDataTable({
+    containerId: 'fab-table-wrap', tableId: 'fab-table',
+    columns: [
+      { label: 'Challan ID',   key: 'ChallanID',      render: function(v) { return '<code class="mono-sm">'+v+'</code>'; } },
+      { label: 'Date',         key: 'ChallanDate',    render: fmtDate },
+      { label: 'Type',         key: 'ChallanType',    render: function(v) { return v==='Out'?'<span class="badge badge-orange">📤 Out</span>':'<span class="badge badge-green">📥 In</span>'; } },
+      { label: 'Fabricator',   key: 'FabricatorName' },
+      { label: 'Status',       key: 'Status',         render: statusBadge },
+      { label: 'Remarks',      key: 'Remarks',        render: function(v) { return escHtml((v||'').substring(0,40)); } },
+      { label: '',             key: '_a', render: function(_, r) {
+        var btns = '<button class="btn btn-xs btn-outline" onclick="viewChallan(\''+r.ChallanID+'\')">View</button>';
+        if (r.Status === 'Open' && r.ChallanType === 'Out') {
+          btns += ' <button class="btn btn-xs btn-success" onclick="receiveChallan(\''+r.ChallanID+'\')">Receive</button>';
+        }
+        return btns;
+      }}
+    ], data: rows
+  });
+}
+
+function viewChallan(challanID) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      var c = res.data;
+      var itemRows = (c.Items||[]).map(function(i) {
+        return '<tr><td>'+escHtml(i.FabricName)+'</td><td>'+escHtml(i.ColorName)+'</td><td>'+fmtNum(i.Qty)+'</td><td>'+escHtml(i.UOM)+'</td><td>'+escHtml(i.Remarks||'')+'</td></tr>';
+      }).join('');
+      var body = `
+        <div class="detail-grid">
+          <div class="detail-item"><span class="detail-label">Challan ID</span><span class="detail-value mono-sm">${c.ChallanID}</span></div>
+          <div class="detail-item"><span class="detail-label">Type</span><span class="detail-value">${c.ChallanType==='Out'?'📤 Out':'📥 In'}</span></div>
+          <div class="detail-item"><span class="detail-label">Date</span><span class="detail-value">${fmtDate(c.ChallanDate)}</span></div>
+          <div class="detail-item"><span class="detail-label">Fabricator</span><span class="detail-value">${escHtml(c.FabricatorName)}</span></div>
+          <div class="detail-item"><span class="detail-label">Status</span><span class="detail-value">${statusBadge(c.Status)}</span></div>
+          <div class="detail-item"><span class="detail-label">Remarks</span><span class="detail-value">${escHtml(c.Remarks||'—')}</span></div>
+        </div>
+        <div class="section-divider">Items</div>
+        <div class="table-scroll"><table class="data-table"><thead><tr><th>Fabric</th><th>Color</th><th>Qty</th><th>UOM</th><th>Remarks</th></tr></thead><tbody>${itemRows}</tbody></table></div>
+      `;
+      var footer = '<button class="btn btn-ghost" onclick="closeModal()">Close</button>';
+      if (c.Status === 'Open' && c.ChallanType === 'Out') {
+        footer = '<button class="btn btn-success" onclick="closeModal();receiveChallan(\''+c.ChallanID+'\')">Receive</button>' + footer;
+      }
+      openModal('Challan — ' + c.ChallanID, body, footer, 'lg');
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverGetFabricatorChallanByID(ERP.token, challanID);
+}
+
+function receiveChallan(challanID) {
+  var body = `
+    <p class="text-muted">Mark this challan as received — goods have returned from fabricator.</p>
+    <div class="form-group"><label class="form-label required">Receive Date</label>
+      <input type="date" id="recv-date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="form-group"><label class="form-label">Remarks</label>
+      <textarea id="recv-remarks" class="form-control" rows="2" placeholder="Any notes on received goods…"></textarea></div>
+  `;
+  var footer = `
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-success" onclick="submitReceiveChallan('${challanID}')">Confirm Receive</button>
+  `;
+  openModal('Receive Challan — ' + challanID, body, footer, 'sm');
+}
+
+function submitReceiveChallan(challanID) {
+  var data = {
+    ReceiveDate: document.getElementById('recv-date').value,
+    Remarks:     document.getElementById('recv-remarks').value
+  };
+  if (!data.ReceiveDate) { showToast('error','Error','Receive date is required'); return; }
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      showToast('success','Success','Challan received successfully');
+      closeModal(); loadFabricatorChallans(); loadFabricatorSummary();
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverReceiveFabricatorChallan(ERP.token, challanID, data);
+}
+
+function openCreateChallanModal() {
+  loadDropdowns(function() {
+    var vendors = (ERP.dropdowns && ERP.dropdowns.vendors) || [];
+    var fabVendors = vendors.filter(function(v) { return v.type === 'Fabricator' || v.type === 'Both'; });
+    var vendorOpts = fabVendors.map(function(v) { return '<option value="'+v.id+'">'+escHtml(v.name)+'</option>'; }).join('');
+    var fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics) || [];
+    var fabricOpts = fabrics.map(function(f) { return '<option value="'+f.id+'">'+escHtml(f.name)+'</option>'; }).join('');
+
+    var body = `
+      <div class="form-row">
+        <div class="form-group"><label class="form-label required">Fabricator</label>
+          <select id="fc-vendor" class="form-control"><option value="">— Select —</option>${vendorOpts}</select></div>
+        <div class="form-group"><label class="form-label required">Date</label>
+          <input type="date" id="fc-date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Remarks</label>
+        <textarea id="fc-remarks" class="form-control" rows="2"></textarea></div>
+      <div class="section-divider">Fabric Items</div>
+      <div id="fc-items"></div>
+      <button class="btn btn-outline btn-sm mt-1" onclick="addFCItem()">+ Add Fabric</button>
+      <div id="fc-item-rows"></div>
+    `;
+    var footer = `
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreateChallan()">Create Challan</button>
+    `;
+    openModal('New Challan Out', body, footer, 'lg');
+    window._fcItems = [];
+    addFCItem();
+  });
+}
+
+function addFCItem() {
+  var fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics) || [];
+  var fabricOpts = fabrics.map(function(f) { return '<option value="'+f.id+'" data-id="'+f.id+'">'+escHtml(f.name)+'</option>'; }).join('');
+  var idx = window._fcItems ? window._fcItems.length : 0;
+  if (!window._fcItems) window._fcItems = [];
+  window._fcItems.push(idx);
+  var div = document.createElement('div');
+  div.id = 'fc-item-'+idx;
+  div.className = 'form-row';
+  div.style.alignItems = 'flex-end';
+  div.innerHTML = `
+    <div class="form-group"><label class="form-label">Fabric</label>
+      <select class="form-control" id="fci-fab-${idx}" onchange="loadFCColors(${idx})"><option value="">— Fabric —</option>${fabricOpts}</select></div>
+    <div class="form-group"><label class="form-label">Color</label>
+      <select class="form-control" id="fci-color-${idx}"><option value="">— Color —</option></select></div>
+    <div class="form-group" style="max-width:100px"><label class="form-label">Qty</label>
+      <input type="number" class="form-control" id="fci-qty-${idx}" min="0.01" step="0.01" placeholder="0"></div>
+    <div class="form-group" style="max-width:90px"><label class="form-label">UOM</label>
+      <select class="form-control" id="fci-uom-${idx}"><option>Meters</option><option>Yards</option><option>Kgs</option></select></div>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fc-item-${idx}').remove()" style="margin-bottom:6px">✕</button>
+  `;
+  var container = document.getElementById('fc-item-rows');
+  if (container) container.appendChild(div);
+}
+
+function loadFCColors(idx) {
+  var fabricID = document.getElementById('fci-fab-'+idx).value;
+  var colorSel = document.getElementById('fci-color-'+idx);
+  colorSel.innerHTML = '<option value="">Loading…</option>';
+  if (!fabricID) { colorSel.innerHTML = '<option value="">— Color —</option>'; return; }
+  var colors = (ERP.dropdowns && ERP.dropdowns.fabricColors || []).filter(function(c) { return c.fabricID === fabricID; });
+  colorSel.innerHTML = '<option value="">— Color —</option>' + colors.map(function(c) { return '<option value="'+c.id+'">'+escHtml(c.name)+'</option>'; }).join('');
+}
+
+function submitCreateChallan() {
+  var fabricatorID = document.getElementById('fc-vendor').value;
+  var date         = document.getElementById('fc-date').value;
+  var remarks      = document.getElementById('fc-remarks').value;
+  if (!fabricatorID) { showToast('error','Error','Select a fabricator'); return; }
+  if (!date)         { showToast('error','Error','Date is required'); return; }
+
+  var items = [];
+  document.querySelectorAll('[id^="fci-fab-"]').forEach(function(el) {
+    var idx       = el.id.replace('fci-fab-','');
+    var fabricID  = el.value;
+    var colorEl   = document.getElementById('fci-color-'+idx);
+    var qtyEl     = document.getElementById('fci-qty-'+idx);
+    var uomEl     = document.getElementById('fci-uom-'+idx);
+    if (fabricID && colorEl && colorEl.value && qtyEl && parseFloat(qtyEl.value) > 0) {
+      items.push({ FabricID: fabricID, FabricColorID: colorEl.value, Qty: parseFloat(qtyEl.value), UOM: uomEl ? uomEl.value : 'Meters' });
+    }
+  });
+  if (items.length === 0) { showToast('error','Error','Add at least one fabric item'); return; }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error','Error',res.message); return; }
+      showToast('success','Success','Challan created: '+res.data.challanID);
+      closeModal(); loadFabricatorChallans(); loadFabricatorSummary();
+    })
+    .withFailureHandler(function(e) { showToast('error','Error',e.message); })
+    .serverCreateFabricatorChallan(ERP.token, { FabricatorID: fabricatorID, ChallanDate: date, Remarks: remarks, items: items });
+}
+</script>

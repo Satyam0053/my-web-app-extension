@@ -1,0 +1,655 @@
+<script>
+// ============================================================
+// InventoryUI.html — Inventory + Fabric Issue (Sprint S5)
+// Current Stock, Inventory Ledger, Stock Adjustment, Fabric Issue
+// ============================================================
+
+// ══════════════════════════════════════════════════════════════
+// CURRENT INVENTORY / STOCK
+// ══════════════════════════════════════════════════════════════
+
+function renderInventory() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const rows = res.data.inventory || [];
+
+      const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+      const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+      const fabricMap = {}; fabrics.forEach(function(f) { fabricMap[f.id] = f.code + ' — ' + f.name; });
+      const colorMap  = {}; colors.forEach(function(c)  { colorMap[c.id]  = c.name; });
+
+      const enriched = rows.map(function(r) {
+        const avail = parseFloat(r.AvailableQty) || 0;
+        const threshold = parseFloat(getSetting_client('LOW_STOCK_THRESHOLD') || 50);
+        return Object.assign({}, r, {
+          FabricName:  fabricMap[r.FabricID]  || r.FabricID,
+          ColorName:   colorMap[r.FabricColorID] || r.FabricColorID,
+          StockStatus: avail <= 0 ? 'Out of Stock' : avail < threshold ? 'Low Stock' : 'In Stock'
+        });
+      });
+
+      const html = renderDataTable({
+        data:     enriched,
+        title:    'Current Inventory',
+        subtitle: 'Live fabric stock levels',
+        addLabel: 'Stock Adjustment',
+        onAdd:    'openStockAdjustment',
+        idKey:    'InventoryID',
+        columns: [
+          { key: 'FabricName',   label: 'Fabric Design' },
+          { key: 'ColorName',    label: 'Color' },
+          { key: 'ReceivedQty',  label: 'Received',  render: function(v) { return fmtNum(v, 3); } },
+          { key: 'IssuedQty',    label: 'Issued',    render: function(v) { return fmtNum(v, 3); } },
+          { key: 'ReturnedQty', label: 'Returned',  render: function(v) { return fmtNum(v, 3); } },
+          { key: 'AvailableQty', label: 'Available', render: function(v) {
+            const qty = parseFloat(v) || 0;
+            const cls = qty <= 0 ? 'color:var(--red)' : qty < 50 ? 'color:var(--amber)' : 'color:var(--green)';
+            return `<strong style="${cls}">${fmtNum(v, 3)}</strong>`;
+          }},
+          { key: 'StockStatus',  label: 'Status', render: function(v) { return statusBadge(v); } },
+          { key: 'LastUpdated',  label: 'Last Updated', render: function(v) { return fmtDate(v); } }
+        ]
+      });
+      setPageContent(html);
+    })
+    .withFailureHandler(function() { setPageContent(errorHTML('Failed to load inventory')); })
+    .serverGetInventory(ERP.token, {});
+}
+
+// Dummy client-side setting getter for threshold
+function getSetting_client(key) {
+  return null; // Threshold comes from backend — use default 50 on client
+}
+
+// ══════════════════════════════════════════════════════════════
+// INVENTORY LEDGER
+// ══════════════════════════════════════════════════════════════
+
+function renderLedger() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const rows = res.data.ledger || [];
+
+      const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+      const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+      const fabricMap = {}; fabrics.forEach(function(f) { fabricMap[f.id] = f.code + ' — ' + f.name; });
+      const colorMap  = {}; colors.forEach(function(c)  { colorMap[c.id]  = c.name; });
+
+      const enriched = rows.map(function(r) {
+        return Object.assign({}, r, {
+          FabricName: fabricMap[r.FabricID]     || r.FabricID,
+          ColorName:  colorMap[r.FabricColorID] || r.FabricColorID
+        });
+      });
+
+      const html = renderDataTable({
+        data:     enriched,
+        title:    'Inventory Ledger',
+        subtitle: 'All stock movements — receipts, issues, adjustments',
+        idKey:    'LedgerID',
+        columns: [
+          { key: 'TransactionDate', label: 'Date',         render: function(v) { return fmtDate(v); } },
+          { key: 'TransactionType', label: 'Type',         render: function(v) { return statusBadge(v); } },
+          { key: 'ReferenceNumber', label: 'Reference' },
+          { key: 'FabricName',      label: 'Fabric' },
+          { key: 'ColorName',       label: 'Color' },
+          { key: 'InQty',           label: 'In (+)',  render: function(v) {
+            const q = parseFloat(v) || 0;
+            return q > 0 ? `<span style="color:var(--green);font-weight:600">+${fmtNum(q,3)}</span>` : '--';
+          }},
+          { key: 'OutQty',          label: 'Out (−)', render: function(v) {
+            const q = parseFloat(v) || 0;
+            return q > 0 ? `<span style="color:var(--red);font-weight:600">−${fmtNum(q,3)}</span>` : '--';
+          }},
+          { key: 'BalanceQty',      label: 'Balance', render: function(v) {
+            return `<strong style="font-family:var(--font-mono)">${fmtNum(v,3)}</strong>`;
+          }},
+          { key: 'Remarks',         label: 'Remarks' },
+          { key: 'CreatedBy',       label: 'By' }
+        ]
+      });
+      setPageContent(html);
+    })
+    .withFailureHandler(function() { setPageContent(errorHTML('Failed to load ledger')); })
+    .serverGetInventoryLedger(ERP.token, {});
+}
+
+// ══════════════════════════════════════════════════════════════
+// STOCK ADJUSTMENT
+// ══════════════════════════════════════════════════════════════
+
+function openStockAdjustment() {
+  loadDropdowns(function() { _openStockAdjustmentModal(); });
+}
+function _openStockAdjustmentModal() {
+  const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+  const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+
+  const fabOpts = fabrics.map(function(f) {
+    return `<option value="${escHtml(f.id)}">${escHtml(f.code)} — ${escHtml(f.name)}</option>`;
+  }).join('');
+
+  openModal('Stock Adjustment', `
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Fabric Design</label>
+        <select class="form-select" id="adjFabric" onchange="onAdjFabricChange()">
+          <option value="">-- Select Fabric --</option>
+          ${fabOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Fabric Color</label>
+        <select class="form-select" id="adjColor">
+          <option value="">-- Select Color --</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <div id="adjCurrentStock" style="display:none;background:var(--surface2);border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:8px">
+        Current Available Stock: <strong id="adjStockVal" style="color:var(--amber);font-family:var(--font-mono)">--</strong>
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Adjustment Type</label>
+        <select class="form-select" id="adjType">
+          <option value="Increase">Increase (Add Stock)</option>
+          <option value="Decrease">Decrease (Remove Stock)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Quantity</label>
+        <input class="form-input" id="adjQty" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Reason for Adjustment</label>
+      <textarea class="form-textarea" id="adjReason" placeholder="e.g. Opening stock entry, Damage write-off, Physical count correction" rows="2"></textarea>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="_closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveStockAdjustment()">Apply Adjustment</button>
+  `);
+}
+
+function onAdjFabricChange() {
+  const fabricID = document.getElementById('adjFabric').value;
+  const colors   = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+  const sel      = document.getElementById('adjColor');
+  const opts     = colors.filter(function(c) { return c.fabricID === fabricID; })
+    .map(function(c) { return `<option value="${escHtml(c.id)}">${escHtml(c.name)}</option>`; }).join('');
+  sel.innerHTML  = '<option value="">-- Select Color --</option>' + opts;
+  sel.onchange   = function() { loadCurrentStock(fabricID, sel.value); };
+  document.getElementById('adjCurrentStock').style.display = 'none';
+}
+
+function loadCurrentStock(fabricID, colorID) {
+  if (!fabricID || !colorID) return;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res.success) {
+        document.getElementById('adjCurrentStock').style.display = 'block';
+        document.getElementById('adjStockVal').textContent = fmtNum(res.data.AvailableQty, 3);
+      }
+    })
+    .serverGetAvailableStock(ERP.token, fabricID, colorID);
+}
+
+function saveStockAdjustment() {
+  const fabricID = document.getElementById('adjFabric').value;
+  const colorID  = document.getElementById('adjColor').value;
+  const adjType  = document.getElementById('adjType').value;
+  const qty      = document.getElementById('adjQty').value;
+  const reason   = document.getElementById('adjReason').value.trim();
+
+  if (!fabricID) { showToast('warning', 'Validation', 'Select Fabric Design'); return; }
+  if (!colorID)  { showToast('warning', 'Validation', 'Select Fabric Color'); return; }
+  if (!qty || parseFloat(qty) <= 0) { showToast('warning', 'Validation', 'Quantity must be positive'); return; }
+  if (!reason)   { showToast('warning', 'Validation', 'Reason is required'); return; }
+
+  const btn = document.querySelector('#globalModal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) {
+        showToast('error', 'Error', res.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'Apply Adjustment'; }
+        return;
+      }
+      showToast('success', 'Success', 'Stock adjusted. New Balance: ' + fmtNum(res.data.NewBalance, 3));
+      _closeModal();
+      renderInventory();
+    })
+    .withFailureHandler(function() {
+      showToast('error', 'Error', 'Failed to save adjustment');
+      if (btn) btn.disabled = false;
+    })
+    .serverStockAdjustment(ERP.token, { FabricID: fabricID, FabricColorID: colorID, AdjustmentType: adjType, Qty: parseFloat(qty), Reason: reason });
+}
+
+// ══════════════════════════════════════════════════════════════
+// FABRIC ISSUE
+// ══════════════════════════════════════════════════════════════
+
+function renderFabricIssue() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const issues = res.data.issues || [];
+
+      const articles = (ERP.dropdowns && ERP.dropdowns.articles) || [];
+      const articleMap = {};
+      articles.forEach(function(a) { articleMap[a.id] = a.name + ' (' + a.code + ')'; });
+
+      const enriched = issues.map(function(i) {
+        return Object.assign({}, i, { ArticleName: articleMap[i.ArticleID] || i.ArticleID });
+      });
+
+      const html = renderDataTable({
+        data:     enriched,
+        title:    'Fabric Issues',
+        subtitle: 'Fabric issued from store to production or fabricator',
+        addLabel: 'Issue Fabric',
+        onAdd:    'openCreateFabricIssue',
+        idKey:    'IssueID',
+        onView:   'viewFabricIssue',
+        columns: [
+          { key: 'IssueID',     label: 'Issue No.' },
+          { key: 'IssueDate',   label: 'Date',     render: function(v) { return fmtDate(v); } },
+          { key: 'ArticleName', label: 'Article' },
+          { key: 'SOID',        label: 'Sales Order' },
+          { key: 'IssueFor',    label: 'Issued For', render: function(v) { return statusBadge(v); } },
+          { key: 'Status',      label: 'Status',     render: function(v) { return statusBadge(v); } },
+          { key: 'CreatedBy',   label: 'Issued By' }
+        ]
+      });
+      setPageContent(html);
+    })
+    .withFailureHandler(function() { setPageContent(errorHTML('Failed to load fabric issues')); })
+    .serverGetFabricIssues(ERP.token, {});
+}
+
+function viewFabricIssue(issueID) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error', 'Error', res.message); return; }
+      const issue = res.data.issue;
+      const items = res.data.items || [];
+
+      const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+      const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+      const fabricMap = {}; fabrics.forEach(function(f) { fabricMap[f.id] = f.code + ' — ' + f.name; });
+      const colorMap  = {}; colors.forEach(function(c)  { colorMap[c.id]  = c.name; });
+
+      const itemRows = items.map(function(i) {
+        return `<tr>
+          <td>${escHtml(fabricMap[i.FabricID]||i.FabricID)}</td>
+          <td>${escHtml(colorMap[i.FabricColorID]||i.FabricColorID)}</td>
+          <td style="text-align:right">${fmtNum(i.AvailableQty, 3)}</td>
+          <td style="text-align:right"><strong style="color:var(--amber)">${fmtNum(i.IssueQty, 3)}</strong></td>
+          <td>${escHtml(i.UOM)}</td>
+          <td style="text-align:right">${fmtNum(i.ReturnedQty, 3)}</td>
+        </tr>`;
+      }).join('');
+
+      openModal('Fabric Issue — ' + issue.IssueID, `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div><label class="form-label">Issue Date</label><div class="form-input" style="background:var(--surface2)">${fmtDate(issue.IssueDate)}</div></div>
+          <div><label class="form-label">Issue For</label><div>${statusBadge(issue.IssueFor)}</div></div>
+          <div><label class="form-label">Article</label><div class="form-input" style="background:var(--surface2)">${escHtml(issue.ArticleID)}</div></div>
+          <div><label class="form-label">Status</label><div>${statusBadge(issue.Status)}</div></div>
+          ${issue.SOID ? `<div><label class="form-label">Sales Order</label><div class="form-input" style="background:var(--surface2)">${escHtml(issue.SOID)}</div></div>` : ''}
+          ${issue.FabricatorID ? `<div><label class="form-label">Fabricator</label><div class="form-input" style="background:var(--surface2)">${escHtml(issue.FabricatorID)}</div></div>` : ''}
+        </div>
+        <div style="font-weight:600;margin-bottom:8px">Issued Items</div>
+        <table class="data-table">
+          <thead><tr>
+            <th>Fabric</th><th>Color</th>
+            <th style="text-align:right">Available (at issue)</th>
+            <th style="text-align:right">Issued</th>
+            <th>UOM</th>
+            <th style="text-align:right">Returned</th>
+          </tr></thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+      `, `<button class="btn btn-primary" onclick="_closeModal()">Close</button>`, 'large');
+    })
+    .withFailureHandler(function() { showToast('error', 'Error', 'Failed to load issue'); })
+    .serverGetFabricIssueByID(ERP.token, issueID);
+}
+
+// ── Create Fabric Issue ────────────────────────────────────
+
+var ISSUE_ITEM_STATE = { rows: [], counter: 0 };
+
+function openCreateFabricIssue() {
+  loadDropdowns(function() { _openCreateFabricIssueModal(); });
+}
+function _openCreateFabricIssueModal() {
+  ISSUE_ITEM_STATE = { rows: [], counter: 0 };
+
+  const articles = (ERP.dropdowns && ERP.dropdowns.articles) || [];
+  const sos      = (ERP.dropdowns && ERP.dropdowns.salesOrders) || [];
+  const vendors  = (ERP.dropdowns && ERP.dropdowns.vendors)  || [];
+  const fabricators = vendors.filter(function(v) { return v.type === 'Fabricator' || v.type === 'Both'; });
+  const today    = new Date().toISOString().slice(0, 10);
+
+  const artOpts  = articles.map(function(a) { return `<option value="${escHtml(a.id)}">${escHtml(a.code)} — ${escHtml(a.name)}</option>`; }).join('');
+  const soOpts   = sos.map(function(s) { return `<option value="${escHtml(s.id)}">${escHtml(s.id)}</option>`; }).join('');
+  const fabOpts  = fabricators.map(function(v) { return `<option value="${escHtml(v.id)}">${escHtml(v.name)}</option>`; }).join('');
+
+  openModal('Issue Fabric from Store', `
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Issue Date</label>
+        <input class="form-input" id="issDate" type="date" value="${today}">
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Issue For</label>
+        <select class="form-select" id="issFor" onchange="onIssuForChange()">
+          <option value="In House Production">In House Production</option>
+          <option value="Fabricator">Fabricator</option>
+          <option value="Sample">Sample</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Article</label>
+        <select class="form-select" id="issArticle" onchange="loadBOMSuggestion()">
+          <option value="">-- Select Article --</option>
+          ${artOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sales Order (Optional)</label>
+        <select class="form-select" id="issSO" onchange="loadBOMSuggestion()">
+          <option value="">-- No SO --</option>
+          ${soOpts}
+        </select>
+      </div>
+    </div>
+    <div class="form-group" id="isssFabricatorRow" style="display:none">
+      <label class="form-label required">Fabricator</label>
+      <select class="form-select" id="issFabricator">
+        <option value="">-- Select Fabricator --</option>
+        ${fabOpts}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Remarks</label>
+      <input class="form-input" id="issRemarks" placeholder="Optional">
+    </div>
+
+    <div id="bomSuggestionArea"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px">
+      <div style="font-weight:600">Fabric Items to Issue</div>
+      <button class="btn btn-ghost" style="font-size:12px" onclick="addIssueItemRow()">+ Add Item</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="min-width:160px">Fabric Design *</th>
+            <th style="min-width:130px">Color *</th>
+            <th style="min-width:90px;color:var(--green)">Available</th>
+            <th style="min-width:100px">Issue Qty *</th>
+            <th style="min-width:70px">UOM *</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="issueItemBody">
+          <tr id="issEmptyRow"><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">No items. Click "+ Add Item".</td></tr>
+        </tbody>
+      </table>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="_closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveFabricIssue()">Issue Fabric</button>
+  `, 'large');
+}
+
+function onIssuForChange() {
+  const val = document.getElementById('issFor').value;
+  document.getElementById('isssFabricatorRow').style.display = val === 'Fabricator' ? 'block' : 'none';
+}
+
+function loadBOMSuggestion() {
+  const articleID = document.getElementById('issArticle').value;
+  const soID      = document.getElementById('issSO').value;
+  if (!articleID) { document.getElementById('bomSuggestionArea').innerHTML = ''; return; }
+
+  document.getElementById('bomSuggestionArea').innerHTML = '<p style="font-size:12px;color:var(--amber);margin:8px 0">Loading BOM suggestion...</p>';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success || !res.data.suggestions || res.data.suggestions.length === 0) {
+        document.getElementById('bomSuggestionArea').innerHTML = '';
+        return;
+      }
+
+      const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+      const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+      const fabricMap = {}; fabrics.forEach(function(f) { fabricMap[f.id] = f.code + ' — ' + f.name; });
+      const colorMap  = {}; colors.forEach(function(c)  { colorMap[c.id]  = c.name; });
+
+      const suggRows = res.data.suggestions.map(function(s, idx) {
+        const warn = s.InsufficientStock
+          ? `<span style="color:var(--red);font-size:11px">⚠ Insufficient</span>`
+          : `<span style="color:var(--green);font-size:11px">✓ OK</span>`;
+        return `<tr>
+          <td>${escHtml(fabricMap[s.FabricID]||s.FabricID)}</td>
+          <td>${escHtml(colorMap[s.FabricColorID]||s.FabricColorID)}</td>
+          <td style="color:var(--green);text-align:right">${fmtNum(s.AvailableQty,3)}</td>
+          <td style="color:var(--amber);font-weight:600;text-align:right">${fmtNum(s.SuggestedQty,3)}</td>
+          <td>${escHtml(s.UOM)}</td>
+          <td>${warn}</td>
+          <td>
+            <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px"
+              onclick="addIssueItemFromSuggestion('${escHtml(s.FabricID)}','${escHtml(s.FabricColorID)}',${s.SuggestedQty},'${escHtml(s.UOM)}')">
+              Use
+            </button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('bomSuggestionArea').innerHTML = `
+        <div style="background:var(--surface2);border-radius:6px;padding:12px 16px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:8px">BOM Suggestion (based on ${soID ? 'SO quantities' : 'BOM definition'})</div>
+          <table class="data-table" style="font-size:12px">
+            <thead><tr><th>Fabric</th><th>Color</th><th style="text-align:right">Available</th><th style="text-align:right">Suggested</th><th>UOM</th><th>Stock</th><th></th></tr></thead>
+            <tbody>${suggRows}</tbody>
+          </table>
+        </div>
+      `;
+    })
+    .withFailureHandler(function() {
+      document.getElementById('bomSuggestionArea').innerHTML = '';
+    })
+    .serverGetBOMSuggestion(ERP.token, articleID, soID || '');
+}
+
+function addIssueItemFromSuggestion(fabricID, fabricColorID, qty, uom) {
+  const emptyRow = document.getElementById('issEmptyRow');
+  if (emptyRow) emptyRow.remove();
+
+  const rid  = '_' + (++ISSUE_ITEM_STATE.counter);
+  ISSUE_ITEM_STATE.rows.push({ id: rid });
+
+  const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+  const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+  const fabricMap = {}; fabrics.forEach(function(f) { fabricMap[f.id] = f.id; });
+
+  const tbody = document.getElementById('issueItemBody');
+  const tr    = document.createElement('tr');
+  tr.id = 'issItemRow_' + rid;
+  tr.dataset.rowid = rid;
+  tr.innerHTML = _renderIssueItemRowInner(rid, fabricID, fabricColorID, qty, uom, colors, fabrics);
+  tbody.appendChild(tr);
+
+  // Load available stock
+  _loadIssueItemStock(rid, fabricID, fabricColorID);
+}
+
+function addIssueItemRow() {
+  const emptyRow = document.getElementById('issEmptyRow');
+  if (emptyRow) emptyRow.remove();
+
+  const rid  = '_' + (++ISSUE_ITEM_STATE.counter);
+  ISSUE_ITEM_STATE.rows.push({ id: rid });
+
+  const fabrics = (ERP.dropdowns && ERP.dropdowns.fabrics)      || [];
+  const colors  = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+
+  const tbody = document.getElementById('issueItemBody');
+  const tr    = document.createElement('tr');
+  tr.id = 'issItemRow_' + rid;
+  tr.dataset.rowid = rid;
+  tr.innerHTML = _renderIssueItemRowInner(rid, '', '', '', 'Meters', colors, fabrics);
+  tbody.appendChild(tr);
+}
+
+function _renderIssueItemRowInner(rid, selFabric, selColor, qty, uom, colors, fabrics) {
+  const fabOpts = fabrics.map(function(f) {
+    return `<option value="${escHtml(f.id)}" ${f.id===selFabric?'selected':''}>${escHtml(f.code)} — ${escHtml(f.name)}</option>`;
+  }).join('');
+
+  const colorOpts = colors
+    .filter(function(c) { return !selFabric || c.fabricID === selFabric; })
+    .map(function(c) { return `<option value="${escHtml(c.id)}" ${c.id===selColor?'selected':''}>${escHtml(c.name)}</option>`; }).join('');
+
+  return `
+    <td>
+      <select class="form-select" id="issFabric_${rid}" style="min-width:150px" onchange="onIssueFabricChange('${rid}')">
+        <option value="">-- Select --</option>${fabOpts}
+      </select>
+    </td>
+    <td>
+      <select class="form-select" id="issColor_${rid}" style="min-width:120px" onchange="_loadIssueItemStock('${rid}',document.getElementById('issFabric_${rid}').value,this.value)">
+        <option value="">-- Select --</option>${colorOpts}
+      </select>
+    </td>
+    <td>
+      <span id="issAvail_${rid}" style="font-family:var(--font-mono);font-size:12px;color:var(--green)">--</span>
+    </td>
+    <td>
+      <input class="form-input" id="issQty_${rid}" type="number" min="0.001" step="0.001"
+             value="${qty||''}" placeholder="0.000" style="min-width:80px">
+    </td>
+    <td>
+      <select class="form-select" id="issUOM_${rid}" style="min-width:70px">
+        <option value="Meters" ${(uom||'Meters')==='Meters'?'selected':''}>Meters</option>
+        <option value="Yards"  ${uom==='Yards'?'selected':''}>Yards</option>
+      </select>
+    </td>
+    <td><button class="action-btn delete" onclick="removeIssueItemRow('${rid}')" title="Remove">✕</button></td>
+  `;
+}
+
+function onIssueFabricChange(rid) {
+  const fabricID = document.getElementById('issFabric_' + rid).value;
+  const colors   = (ERP.dropdowns && ERP.dropdowns.fabricColors) || [];
+  const sel      = document.getElementById('issColor_' + rid);
+  const opts     = colors.filter(function(c) { return c.fabricID === fabricID; })
+    .map(function(c) { return `<option value="${escHtml(c.id)}">${escHtml(c.name)}</option>`; }).join('');
+  sel.innerHTML  = '<option value="">-- Select Color --</option>' + opts;
+  document.getElementById('issAvail_' + rid).textContent = '--';
+}
+
+function _loadIssueItemStock(rid, fabricID, colorID) {
+  if (!fabricID || !colorID) return;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res.success) {
+        const avail = parseFloat(res.data.AvailableQty) || 0;
+        const el    = document.getElementById('issAvail_' + rid);
+        if (el) {
+          el.textContent = fmtNum(avail, 3);
+          el.style.color = avail <= 0 ? 'var(--red)' : avail < 50 ? 'var(--amber)' : 'var(--green)';
+        }
+      }
+    })
+    .serverGetAvailableStock(ERP.token, fabricID, colorID);
+}
+
+function removeIssueItemRow(rid) {
+  ISSUE_ITEM_STATE.rows = ISSUE_ITEM_STATE.rows.filter(function(r) { return r.id !== rid; });
+  const tr = document.getElementById('issItemRow_' + rid);
+  if (tr) tr.remove();
+  if (!document.querySelector('#issueItemBody tr[data-rowid]')) {
+    const tr2 = document.createElement('tr');
+    tr2.id = 'issEmptyRow';
+    tr2.innerHTML = '<td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">No items. Click "+ Add Item".</td>';
+    document.getElementById('issueItemBody').appendChild(tr2);
+  }
+}
+
+function saveFabricIssue() {
+  const issDate     = document.getElementById('issDate').value;
+  const issFor      = document.getElementById('issFor').value;
+  const articleID   = document.getElementById('issArticle').value;
+  const soID        = document.getElementById('issSO').value;
+  const fabricatorID = document.getElementById('issFabricator') ? document.getElementById('issFabricator').value : '';
+  const remarks     = document.getElementById('issRemarks').value.trim();
+
+  if (!issDate)    { showToast('warning', 'Validation', 'Issue Date is required'); return; }
+  if (!articleID)  { showToast('warning', 'Validation', 'Article is required'); return; }
+  if (issFor === 'Fabricator' && !fabricatorID) { showToast('warning', 'Validation', 'Fabricator is required'); return; }
+
+  const rows   = document.querySelectorAll('#issueItemBody tr[data-rowid]');
+  const items  = [];
+  let hasError = false;
+
+  rows.forEach(function(tr) {
+    if (hasError) return;
+    const rid         = tr.dataset.rowid;
+    const fabricID    = document.getElementById('issFabric_'+ rid).value;
+    const colorID     = document.getElementById('issColor_' + rid).value;
+    const qty         = document.getElementById('issQty_'   + rid).value;
+    const uom         = document.getElementById('issUOM_'   + rid).value;
+
+    if (!fabricID || !colorID || !qty || parseFloat(qty) <= 0) {
+      showToast('warning', 'Validation', 'Each item must have Fabric, Color, and a positive Qty');
+      hasError = true;
+      return;
+    }
+    items.push({ FabricID: fabricID, FabricColorID: colorID, IssueQty: parseFloat(qty), UOM: uom });
+  });
+
+  if (hasError) return;
+  if (items.length === 0) { showToast('warning', 'Validation', 'At least one fabric item is required'); return; }
+
+  const btn = document.querySelector('#globalModal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) {
+        showToast('error', 'Error', res.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'Issue Fabric'; }
+        return;
+      }
+      showToast('success', 'Success', 'Fabric issued: ' + res.data.IssueID);
+      _closeModal();
+      renderFabricIssue();
+    })
+    .withFailureHandler(function() {
+      showToast('error', 'Error', 'Failed to create fabric issue');
+      if (btn) btn.disabled = false;
+    })
+    .serverCreateFabricIssue(ERP.token, {
+      IssueDate:    issDate,
+      ArticleID:    articleID,
+      SOID:         soID || '',
+      IssueFor:     issFor,
+      FabricatorID: fabricatorID || '',
+      Remarks:      remarks,
+      items:        items
+    });
+}
+</script>

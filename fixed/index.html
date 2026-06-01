@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Garment ERP</title>
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+
+<!-- App Shell -->
+<div id="app">
+
+  <!-- Login Screen -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-bg">
+      <div class="login-card">
+        <div class="login-logo">
+          <div class="logo-icon">
+            <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 12 L20 6 L32 12 L32 28 L20 34 L8 28 Z" stroke="currentColor" stroke-width="2" fill="none"/>
+              <path d="M8 12 L20 18 L32 12" stroke="currentColor" stroke-width="2"/>
+              <path d="M20 18 L20 34" stroke="currentColor" stroke-width="2"/>
+              <circle cx="14" cy="22" r="2" fill="currentColor"/>
+              <circle cx="26" cy="22" r="2" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="logo-text">
+            <span class="logo-primary">Garment</span>
+            <span class="logo-secondary">ERP System</span>
+          </div>
+        </div>
+
+        <h2 class="login-title">Welcome Back</h2>
+        <p class="login-subtitle">Sign in to your account to continue</p>
+
+        <div id="loginError" class="alert alert-error" style="display:none"></div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
+            </span>
+            <input type="email" id="loginEmail" class="form-input" placeholder="admin@erp.com" autocomplete="email">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+            </span>
+            <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" autocomplete="current-password">
+            <button type="button" class="input-toggle" onclick="togglePassword()">
+              <svg id="eyeIcon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-full" id="loginBtn" onclick="doLogin()">
+          <span id="loginBtnText">Sign In</span>
+          <span id="loginSpinner" class="spinner" style="display:none"></span>
+        </button>
+
+        <div class="login-footer">
+          <span>Powered by Garment ERP v1.0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App (shown after login) -->
+  <div id="mainApp" style="display:none">
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <div class="logo-icon-sm">
+            <svg viewBox="0 0 40 40" fill="none"><path d="M8 12 L20 6 L32 12 L32 28 L20 34 L8 28 Z" stroke="currentColor" stroke-width="2" fill="none"/><path d="M8 12 L20 18 L32 12" stroke="currentColor" stroke-width="2"/><path d="M20 18 L20 34" stroke="currentColor" stroke-width="2"/></svg>
+          </div>
+          <span class="sidebar-brand">GarmentERP</span>
+        </div>
+        <button class="sidebar-toggle-btn" onclick="toggleSidebar()">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebarNav">
+
+        <div class="nav-item" onclick="navigate('dashboard')" data-page="dashboard">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/></svg></span>
+          <span class="nav-label">Dashboard</span>
+        </div>
+
+        <div class="nav-section">MASTERS</div>
+
+        <div class="nav-item" onclick="navigate('buyers')" data-page="buyers" data-module="BuyerMaster">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg></span>
+          <span class="nav-label">Buyers</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('articles')" data-page="articles" data-module="ArticleMaster">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Articles/Styles</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('bom')" data-page="bom" data-module="BOM">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">BOM</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('fabrics')" data-page="fabrics" data-module="FabricMaster">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Fabric Master</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('vendors')" data-page="vendors" data-module="VendorMaster">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4zm14 4H2v6a2 2 0 002 2h12a2 2 0 002-2V8zM6 11a1 1 0 100 2h4a1 1 0 100-2H6z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Vendors</span>
+        </div>
+
+        <div class="nav-section">SALES</div>
+
+        <div class="nav-item" onclick="navigate('salesorders')" data-page="salesorders" data-module="SalesOrder">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3z"/></svg></span>
+          <span class="nav-label">Sales Orders</span>
+        </div>
+
+        <div class="nav-section">PURCHASE</div>
+
+        <div class="nav-item" onclick="navigate('purchaseorders')" data-page="purchaseorders" data-module="PurchaseOrder">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a4 4 0 00-4 4v1H5a1 1 0 00-.994.89l-1 9A1 1 0 004 18h12a1 1 0 00.994-1.11l-1-9A1 1 0 0015 7h-1V6a4 4 0 00-4-4zm2 5V6a2 2 0 10-4 0v1h4zm-6 3a1 1 0 112 0 1 1 0 01-2 0zm7-1a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Purchase Orders</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('grn')" data-page="grn" data-module="GRN">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/><path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1v-1h3.05a2.5 2.5 0 014.9 0H19a1 1 0 001-1v-2a4 4 0 00-4-4h-3V4a1 1 0 00-1-1H3z"/></svg></span>
+          <span class="nav-label">Goods Receipt (GRN)</span>
+        </div>
+
+        <div class="nav-section">INVENTORY</div>
+
+        <div class="nav-item" onclick="navigate('inventory')" data-page="inventory" data-module="Inventory">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z"/><path fill-rule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Current Stock</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('fabricissue')" data-page="fabricissue" data-module="FabricIssue">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Fabric Issue</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('ledger')" data-page="ledger" data-module="InventoryLedger">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Stock Ledger</span>
+        </div>
+
+        <div class="nav-section">PRODUCTION</div>
+
+        <div class="nav-item" onclick="navigate('productionplan')" data-page="productionplan" data-module="ProductionPlan">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Production Plan</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('bundles')" data-page="bundles" data-module="BundleManagement">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 17a1 1 0 001.447.894l4-2A1 1 0 0017 15V9.236a1 1 0 00-1.447-.894l-4 2a1 1 0 00-.553.894V17zM15.211 6.276a1 1 0 000-1.788l-4.764-2.382a1 1 0 00-.894 0L4.789 4.488a1 1 0 000 1.788l4.764 2.382a1 1 0 00.894 0l4.764-2.382zM4.447 8.342A1 1 0 003 9.236V15a1 1 0 00.553.894l4 2A1 1 0 009 17v-5.764a1 1 0 00-.553-.894l-4-2z"/></svg></span>
+          <span class="nav-label">Bundle Tracking</span>
+        </div>
+
+        <div class="nav-item has-children" onclick="toggleSubmenu(this)">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Processes</span>
+          <span class="nav-chevron">▸</span>
+        </div>
+        <div class="nav-submenu">
+          <div class="nav-subitem" onclick="navigate('cutting')" data-page="cutting">✂ Cutting</div>
+          <div class="nav-subitem" onclick="navigate('stitching')" data-page="stitching">🧵 Stitching</div>
+          <div class="nav-subitem" onclick="navigate('finishing')" data-page="finishing">✨ Finishing</div>
+          <div class="nav-subitem" onclick="navigate('packing')" data-page="packing">📦 Packing</div>
+        </div>
+
+        <div class="nav-section">FABRICATOR</div>
+
+        <div class="nav-item" onclick="navigate('fabricator')" data-page="fabricator" data-module="FabricatorChallan">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Fabricator Job Work</span>
+        </div>
+
+        <div class="nav-section">DISPATCH</div>
+
+        <div class="nav-item" onclick="navigate('dispatch')" data-page="dispatch" data-module="Dispatch">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/><path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z"/></svg></span>
+          <span class="nav-label">Dispatch</span>
+        </div>
+
+        <div class="nav-item" onclick="navigate('returns')" data-page="returns" data-module="Returns">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Returns</span>
+        </div>
+
+        <div class="nav-section">REPORTS</div>
+
+        <div class="nav-item" onclick="navigate('reports')" data-page="reports" data-module="Reports">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Reports & Dashboards</span>
+        </div>
+
+        <div class="nav-section admin-only">SETTINGS</div>
+
+        <div class="nav-item admin-only" onclick="navigate('users')" data-page="users" data-module="UserManagement">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg></span>
+          <span class="nav-label">User Management</span>
+        </div>
+
+        <div class="nav-item admin-only" onclick="navigate('auditlogs')" data-page="auditlogs" data-module="AuditLogs">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Audit Logs</span>
+        </div>
+
+        <div class="nav-item admin-only" onclick="navigate('settings')" data-page="settings" data-module="Settings">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.533 1.533 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg></span>
+          <span class="nav-label">Settings</span>
+        </div>
+
+      </nav>
+
+      <div class="sidebar-user">
+        <div class="user-avatar" id="userAvatar">SA</div>
+        <div class="user-info">
+          <div class="user-name" id="sidebarUserName">Loading...</div>
+          <div class="user-role" id="sidebarUserRole">--</div>
+        </div>
+        <button class="logout-btn" onclick="doLogout()" title="Logout">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="main-content" id="mainContent">
+
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="topbar-menu-btn" onclick="toggleSidebar()">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+          </button>
+          <div class="breadcrumb" id="breadcrumb">
+            <span>Dashboard</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="topbar-date" id="topbarDate"></div>
+          <button class="theme-toggle-btn" id="themeToggleBtn" onclick="openThemePicker()" title="Change Theme">🎨</button>
+          <button class="topbar-icon-btn" onclick="refreshCurrentPage()" title="Refresh">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Page Content -->
+      <main class="page-content" id="pageContent">
+        <!-- Pages load here dynamically -->
+        <div id="pageLoader" class="page-loader">
+          <div class="loader-spinner"></div>
+          <p>Loading...</p>
+        </div>
+      </main>
+
+    </div>
+  </div>
+
+  <!-- Global Toast Notification -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Global Modal -->
+  <div id="modalOverlay" class="modal-overlay" onclick="closeModal(event)">
+    <div class="modal" id="globalModal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Modal Title</h3>
+        <button class="modal-close" onclick="closeModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog -->
+  <div id="confirmOverlay" class="modal-overlay" style="display:none">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3 class="modal-title" id="confirmTitle">Confirm Action</h3>
+      </div>
+      <div class="modal-body">
+        <p id="confirmMessage"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="cancelConfirm()">Cancel</button>
+        <button class="btn btn-danger" id="confirmOkBtn" onclick="acceptConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<?!= include('JavaScript'); ?>
+<?!= include('MastersUI'); ?>
+<?!= include('BOMUI'); ?>
+<?!= include('SalesOrderUI'); ?>
+<?!= include('PurchaseUI'); ?>
+<?!= include('InventoryUI'); ?>
+<?!= include('ProductionPlanUI'); ?>
+<?!= include('BundleUI'); ?>
+<?!= include('FabricatorUI'); ?>
+<?!= include('DispatchUI'); ?>
+<?!= include('ReturnUI'); ?>
+<?!= include('ReportUI'); ?>
+<!-- Theme Picker Panel -->
+<div id="themePickerOverlay" class="theme-picker-overlay" onclick="closeThemePicker()" style="display:none"></div>
+<div id="themePickerPanel" class="theme-picker-panel" style="display:none">
+  <div class="theme-picker-header">
+    <span>Choose Theme</span>
+    <button onclick="closeThemePicker()" class="theme-picker-close">✕</button>
+  </div>
+  <div class="theme-picker-grid">
+    <button class="theme-card" data-theme="dark" onclick="selectTheme('dark')">
+      <div class="theme-preview dark-preview">
+        <div class="tp-sidebar"></div>
+        <div class="tp-body">
+          <div class="tp-bar"></div>
+          <div class="tp-card"></div>
+          <div class="tp-card"></div>
+        </div>
+      </div>
+      <div class="theme-card-label">
+        <span class="theme-dot" style="background:#f5a623"></span>
+        <span>Dark Navy</span>
+        <span class="theme-check" id="check-dark">✔</span>
+      </div>
+    </button>
+    <button class="theme-card" data-theme="light" onclick="selectTheme('light')">
+      <div class="theme-preview light-preview">
+        <div class="tp-sidebar"></div>
+        <div class="tp-body">
+          <div class="tp-bar"></div>
+          <div class="tp-card"></div>
+          <div class="tp-card"></div>
+        </div>
+      </div>
+      <div class="theme-card-label">
+        <span class="theme-dot" style="background:#d4880a"></span>
+        <span>Light Pro</span>
+        <span class="theme-check" id="check-light"></span>
+      </div>
+    </button>
+    <button class="theme-card" data-theme="aurora" onclick="selectTheme('aurora')">
+      <div class="theme-preview aurora-preview">
+        <div class="tp-sidebar"></div>
+        <div class="tp-body">
+          <div class="tp-bar"></div>
+          <div class="tp-card"></div>
+          <div class="tp-card"></div>
+        </div>
+      </div>
+      <div class="theme-card-label">
+        <span class="theme-dot" style="background:linear-gradient(135deg,#a78bfa,#34d399)"></span>
+        <span>Aurora</span>
+        <span class="theme-check" id="check-aurora"></span>
+      </div>
+    </button>
+    <button class="theme-card" data-theme="crimson" onclick="selectTheme('crimson')">
+      <div class="theme-preview crimson-preview">
+        <div class="tp-sidebar"></div>
+        <div class="tp-body">
+          <div class="tp-bar"></div>
+          <div class="tp-card"></div>
+          <div class="tp-card"></div>
+        </div>
+      </div>
+      <div class="theme-card-label">
+        <span class="theme-dot" style="background:#ff4d6d"></span>
+        <span>Crimson</span>
+        <span class="theme-check" id="check-crimson"></span>
+      </div>
+    </button>
+    <button class="theme-card" data-theme="ocean" onclick="selectTheme('ocean')">
+      <div class="theme-preview ocean-preview">
+        <div class="tp-sidebar"></div>
+        <div class="tp-body">
+          <div class="tp-bar"></div>
+          <div class="tp-card"></div>
+          <div class="tp-card"></div>
+        </div>
+      </div>
+      <div class="theme-card-label">
+        <span class="theme-dot" style="background:#06b6d4"></span>
+        <span>Ocean</span>
+        <span class="theme-check" id="check-ocean"></span>
+      </div>
+    </button>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,392 @@
+<!-- ============================================================
+     BundleUI.html — Sprint S6
+     Handles: Bundle list, scan by barcode, process status updates
+     ============================================================ -->
+<script>
+// ── Page: Bundle Tracking ─────────────────────────────────────
+function renderBundleTracking() {
+  setPageTitle('Bundle Tracking');
+  const content = document.getElementById('page-content');
+  content.innerHTML = `
+    <!-- Quick Scan Bar -->
+    <div class="scan-bar">
+      <div class="scan-bar-inner">
+        <span class="scan-icon">🔍</span>
+        <input type="text" id="barcode-input" class="scan-input" placeholder="Scan or type barcode…"
+          onkeydown="if(event.key==='Enter') scanBarcode()" autocomplete="off" autofocus>
+        <button class="btn btn-primary" onclick="scanBarcode()">Scan</button>
+      </div>
+    </div>
+
+    <!-- Filters + List -->
+    <div class="page-toolbar mt-2">
+      <div class="toolbar-left">
+        <input type="text" id="bundle-search" class="search-input" placeholder="Search bundles…"
+          oninput="filterTable('bundle-table',this.value)">
+        <select id="bundle-process-filter" class="filter-select" onchange="loadBundleList()">
+          <option value="">All Processes</option>
+          <option value="Pre-Cutting">Pre-Cutting</option>
+          <option value="Cutting">Cutting</option>
+          <option value="Pre-Stitching">Pre-Stitching</option>
+          <option value="Stitching">Stitching</option>
+          <option value="Pre-Finishing">Pre-Finishing</option>
+          <option value="Finishing">Finishing</option>
+          <option value="Pre-Packing">Pre-Packing</option>
+          <option value="Packing">Packing</option>
+          <option value="Completed">Completed</option>
+        </select>
+        <select id="bundle-so-filter" class="filter-select" onchange="loadBundleList()">
+          <option value="">All SOs</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-outline" onclick="openBulkUpdateModal()">📦 Bulk Update</button>
+      </div>
+    </div>
+
+    <div id="bundle-table-wrap"><div class="loading-spinner"></div></div>
+  `;
+
+  // Populate SO filter
+  const soSel = document.getElementById('bundle-so-filter');
+  (appState.dropdowns.salesOrders || []).forEach(so => {
+    const opt = document.createElement('option');
+    opt.value = so.value;
+    opt.textContent = so.label;
+    soSel.appendChild(opt);
+  });
+
+  loadBundleList();
+}
+
+function loadBundleList() {
+  const filters = {};
+  const process = (document.getElementById('bundle-process-filter') || {}).value;
+  const soID    = (document.getElementById('bundle-so-filter')      || {}).value;
+  if (process) filters.currentProcess = process;
+  if (soID)    filters.soID           = soID;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) { showToast(res.message, 'error'); return; }
+      renderBundleTable(res.data);
+    })
+    .withFailureHandler(err => showToast(err.message, 'error'))
+    .serverGetBundles(appState.token, filters);
+}
+
+function renderBundleTable(bundles) {
+  if (!bundles || bundles.length === 0) {
+    document.getElementById('bundle-table-wrap').innerHTML =
+      `<div class="empty-state"><span class="empty-icon">📦</span><p>No bundles found</p></div>`;
+    return;
+  }
+  renderDataTable({
+    containerId: 'bundle-table-wrap',
+    tableId:     'bundle-table',
+    columns: [
+      { label: '#',        key: 'BundleNumber' },
+      { label: 'Barcode',  key: 'BarcodeValue', render: v => `<code class="mono-sm">${v}</code>` },
+      { label: 'Article',  key: 'ArticleName' },
+      { label: 'Size',     key: 'Size' },
+      { label: 'Color',    key: 'Color', render: v => escHtml(v || '—') },
+      { label: 'Pcs',      key: 'Pieces', render: v => fmtNum(v) },
+      { label: 'Stage',    key: 'CurrentProcess', render: v => stageBadge(v) },
+      { label: 'Cutting',  key: 'CuttingStatus',   render: v => miniStatusDot(v) },
+      { label: 'Stitching',key: 'StitchingStatus', render: v => miniStatusDot(v) },
+      { label: 'Finishing',key: 'FinishingStatus', render: v => miniStatusDot(v) },
+      { label: 'Packing',  key: 'PackingStatus',   render: v => miniStatusDot(v) },
+      { label: '',         key: '_actions', render: (_, row) =>
+        `<button class="btn btn-xs btn-outline" onclick="viewBundle('${row.BundleID}')">View</button>`
+      }
+    ],
+    data: bundles
+  });
+}
+
+// ── Barcode Scan ──────────────────────────────────────────────
+function scanBarcode() {
+  const input = document.getElementById('barcode-input');
+  const val   = (input.value || '').trim();
+  if (!val) return;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) { showToast('Bundle not found: ' + val, 'error'); return; }
+      showBundleDetailModal(res.data);
+      input.value = '';
+      input.focus();
+    })
+    .withFailureHandler(err => showToast(err.message, 'error'))
+    .serverGetBundleByBarcode(appState.token, val);
+}
+
+// ── View Bundle Detail ────────────────────────────────────────
+function viewBundle(bundleID) {
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) { showToast(res.message, 'error'); return; }
+      showBundleDetailModal(res.data);
+    })
+    .withFailureHandler(err => showToast(err.message, 'error'))
+    .serverGetBundleByID(appState.token, bundleID);
+}
+
+function showBundleDetailModal(bundle) {
+  const processes = ['Cutting', 'Stitching', 'Finishing', 'Packing'];
+  const statusField = { Cutting:'CuttingStatus', Stitching:'StitchingStatus',
+    Finishing:'FinishingStatus', Packing:'PackingStatus' };
+  const opField = { Cutting:'CuttingOperator', Stitching:'StitchingOperator',
+    Finishing:'FinishingOperator', Packing:'PackingOperator' };
+
+  // Determine next actionable process
+  let nextProcess = null;
+  let nextAction  = null;
+  for (const proc of processes) {
+    const s = bundle[statusField[proc]];
+    if (s === 'Pending' || s === 'In Progress') {
+      nextProcess = proc;
+      nextAction  = s === 'Pending' ? 'In Progress' : 'Done';
+      break;
+    }
+  }
+
+  const processRows = processes.map(proc => {
+    const s  = bundle[statusField[proc]] || 'Pending';
+    const op = bundle[opField[proc]]     || '—';
+    return `
+      <tr>
+        <td><strong>${proc}</strong></td>
+        <td>${statusBadge(s)}</td>
+        <td>${escHtml(op)}</td>
+        <td>
+          ${s !== 'Done' ? `
+            <button class="btn btn-xs btn-primary"
+              onclick="updateProcess('${bundle.BundleID}','${proc}','${s === 'Pending' ? 'In Progress' : 'Done'}')">
+              Mark ${s === 'Pending' ? 'In Progress' : 'Done'}
+            </button>` : '✔'}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  const trackingRows = (bundle.Tracking || []).map(t => `
+    <tr>
+      <td>${escHtml(t.Process)}</td>
+      <td>${statusBadge(t.Status)}</td>
+      <td>${escHtml(t.Operator)}</td>
+      <td>${escHtml(t.Notes || '—')}</td>
+      <td>${fmtDateTime(t.TrackedAt)}</td>
+    </tr>
+  `).join('');
+
+  const body = `
+    <div class="detail-grid">
+      <div class="detail-item"><span class="detail-label">Bundle #</span><span class="detail-value">${bundle.BundleNumber}</span></div>
+      <div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value mono-sm">${bundle.BarcodeValue}</span></div>
+      <div class="detail-item"><span class="detail-label">Article</span><span class="detail-value">${escHtml(bundle.ArticleName)}</span></div>
+      <div class="detail-item"><span class="detail-label">Style</span><span class="detail-value">${escHtml(bundle.StyleCode)}</span></div>
+      <div class="detail-item"><span class="detail-label">SO #</span><span class="detail-value">${escHtml(bundle.SONumber)}</span></div>
+      <div class="detail-item"><span class="detail-label">Buyer</span><span class="detail-value">${escHtml(bundle.BuyerName)}</span></div>
+      <div class="detail-item"><span class="detail-label">Size</span><span class="detail-value">${escHtml(bundle.Size)}</span></div>
+      <div class="detail-item"><span class="detail-label">Color</span><span class="detail-value">${escHtml(bundle.Color || '—')}</span></div>
+      <div class="detail-item"><span class="detail-label">Pieces</span><span class="detail-value">${fmtNum(bundle.Pieces)}</span></div>
+      <div class="detail-item"><span class="detail-label">Stage</span><span class="detail-value">${stageBadge(bundle.CurrentProcess)}</span></div>
+    </div>
+
+    <div class="section-divider">Process Status</div>
+    <table class="data-table">
+      <thead><tr><th>Process</th><th>Status</th><th>Operator</th><th>Action</th></tr></thead>
+      <tbody>${processRows}</tbody>
+    </table>
+
+    ${(bundle.Tracking||[]).length > 0 ? `
+      <div class="section-divider">Tracking History</div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Process</th><th>Status</th><th>Operator</th><th>Notes</th><th>Time</th></tr></thead>
+          <tbody>${trackingRows}</tbody>
+        </table>
+      </div>
+    ` : ''}
+  `;
+
+  const footer = `<button class="btn btn-ghost" onclick="closeModal()">Close</button>`;
+  openModal(`Bundle #${bundle.BundleNumber} — ${bundle.BarcodeValue}`, body, footer, 'lg');
+}
+
+// ── Update Process from Detail Modal ─────────────────────────
+function updateProcess(bundleID, process, status) {
+  // Ask for optional operator name
+  const operatorName = prompt(`Operator name for ${process} (leave blank to use your login):`);
+  if (operatorName === null) return; // user cancelled
+
+  const payload = { operator: operatorName || '', notes: '' };
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) { showToast(res.message, 'error'); return; }
+      showToast(`${process} → ${status}`, 'success');
+      closeModal();
+      // Reload bundle detail
+      viewBundle(bundleID);
+    })
+    .withFailureHandler(err => showToast(err.message, 'error'))
+    .serverUpdateBundleProcess(appState.token, bundleID, process, status, payload);
+}
+
+// ── Bulk Update Modal ─────────────────────────────────────────
+function openBulkUpdateModal() {
+  const body = `
+    <p class="text-muted">Select a plan and process stage to bulk-update multiple bundles at once.</p>
+    <div class="form-group">
+      <label class="form-label required">Production Plan</label>
+      <select id="bulk-plan" class="form-control" onchange="loadBulkBundles()">
+        <option value="">— Select Plan —</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Process</label>
+      <select id="bulk-process" class="form-control" onchange="loadBulkBundles()">
+        <option value="">— Select Process —</option>
+        <option value="Cutting">Cutting</option>
+        <option value="Stitching">Stitching</option>
+        <option value="Finishing">Finishing</option>
+        <option value="Packing">Packing</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label required">New Status</label>
+      <select id="bulk-status" class="form-control" onchange="loadBulkBundles()">
+        <option value="In Progress">In Progress</option>
+        <option value="Done">Done</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Operator Name</label>
+      <input type="text" id="bulk-operator" class="form-control" placeholder="Optional">
+    </div>
+    <div id="bulk-bundle-list" class="mt-2" style="max-height:260px;overflow-y:auto"></div>
+  `;
+  const footer = `
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="submitBulkUpdate()">Update Selected</button>
+  `;
+  openModal('Bulk Bundle Update', body, footer, 'lg');
+
+  // Populate plan dropdown
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) return;
+      const sel = document.getElementById('bulk-plan');
+      if (!sel) return;
+      res.data.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.PlanID;
+        opt.textContent = `${p.SONumber} / ${p.ArticleName} (${p.Status})`;
+        sel.appendChild(opt);
+      });
+    })
+    .withFailureHandler(() => {})
+    .serverGetProductionPlans(appState.token, { status: '' });
+}
+
+function loadBulkBundles() {
+  const planID  = (document.getElementById('bulk-plan')    || {}).value;
+  const process = (document.getElementById('bulk-process') || {}).value;
+  const status  = (document.getElementById('bulk-status')  || {}).value;
+  const listDiv = document.getElementById('bulk-bundle-list');
+  if (!listDiv) return;
+
+  if (!planID || !process) { listDiv.innerHTML = ''; return; }
+
+  listDiv.innerHTML = '<div class="loading-spinner-sm"></div>';
+
+  // Filter bundles where process status is Pending (for In Progress) or In Progress (for Done)
+  const requiredCurrent = status === 'In Progress' ? 'Pending' : 'In Progress';
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.success) { listDiv.innerHTML = ''; return; }
+      const statusField = { Cutting:'CuttingStatus', Stitching:'StitchingStatus',
+        Finishing:'FinishingStatus', Packing:'PackingStatus' };
+      const field = statusField[process];
+      const bundles = (res.data || []).filter(b => b.PlanID === planID && b[field] === requiredCurrent);
+
+      if (bundles.length === 0) {
+        listDiv.innerHTML = `<p class="text-muted text-sm">No bundles with status "${requiredCurrent}" in this process.</p>`;
+        return;
+      }
+
+      const rows = bundles.map(b => `
+        <label class="checkbox-row">
+          <input type="checkbox" class="bulk-cb" value="${b.BundleID}" checked>
+          <span>Bundle #${b.BundleNumber} — ${escHtml(b.BarcodeValue)} — Size: ${escHtml(b.Size)}, ${fmtNum(b.Pieces)} pcs</span>
+        </label>
+      `).join('');
+
+      listDiv.innerHTML = `
+        <div style="margin-bottom:6px">
+          <label class="checkbox-row">
+            <input type="checkbox" id="bulk-select-all" checked onchange="toggleAllBulk(this.checked)">
+            <strong>Select All (${bundles.length} bundles)</strong>
+          </label>
+        </div>
+        ${rows}
+      `;
+    })
+    .withFailureHandler(() => { listDiv.innerHTML = ''; })
+    .serverGetBundles(appState.token, { planID });
+}
+
+function toggleAllBulk(checked) {
+  document.querySelectorAll('.bulk-cb').forEach(cb => { cb.checked = checked; });
+}
+
+function submitBulkUpdate() {
+  const process  = (document.getElementById('bulk-process')  || {}).value;
+  const status   = (document.getElementById('bulk-status')   || {}).value;
+  const operator = (document.getElementById('bulk-operator') || {}).value || '';
+
+  if (!process || !status) { showToast('Select process and status', 'error'); return; }
+
+  const bundleIDs = Array.from(document.querySelectorAll('.bulk-cb:checked')).map(cb => cb.value);
+  if (bundleIDs.length === 0) { showToast('No bundles selected', 'error'); return; }
+
+  showConfirm(`Update ${bundleIDs.length} bundle(s) → ${process}: ${status}?`, () => {
+    google.script.run
+      .withSuccessHandler(res => {
+        if (!res.success) { showToast(res.message, 'error'); return; }
+        showToast(`Updated ${res.data.success.length} bundles`, 'success');
+        if (res.data.failed.length > 0) {
+          showToast(`${res.data.failed.length} failed — check logs`, 'warning');
+        }
+        closeModal();
+        loadBundleList();
+      })
+      .withFailureHandler(err => showToast(err.message, 'error'))
+      .serverBulkUpdateBundleProcess(appState.token, bundleIDs, process, status, { operator });
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function stageBadge(stage) {
+  const map = {
+    'Pre-Cutting':    { cls: 'badge-gray',    icon: '○' },
+    'Cutting':        { cls: 'badge-blue',    icon: '✂' },
+    'Pre-Stitching':  { cls: 'badge-gray',    icon: '○' },
+    'Stitching':      { cls: 'badge-indigo',  icon: '🪡' },
+    'Pre-Finishing':  { cls: 'badge-gray',    icon: '○' },
+    'Finishing':      { cls: 'badge-purple',  icon: '✨' },
+    'Pre-Packing':    { cls: 'badge-gray',    icon: '○' },
+    'Packing':        { cls: 'badge-amber',   icon: '📦' },
+    'Completed':      { cls: 'badge-success', icon: '✔' }
+  };
+  const m = map[stage] || { cls: 'badge-gray', icon: '?' };
+  return `<span class="badge ${m.cls}">${m.icon} ${escHtml(stage)}</span>`;
+}
+
+function miniStatusDot(status) {
+  const map = { Pending: '⬜', 'In Progress': '🟡', Done: '✅' };
+  return `<span title="${escHtml(status)}">${map[status] || '⬜'}</span>`;
+}
+</script>

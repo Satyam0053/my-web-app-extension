@@ -1,0 +1,418 @@
+<script>
+// ============================================================
+// SalesOrderUI.html — Sales Orders (Sprint S3)
+// SO list, create/view, multi-item entry, status transitions
+// ============================================================
+
+// ══════════════════════════════════════════════════════════════
+// RENDER SALES ORDERS LIST
+// ══════════════════════════════════════════════════════════════
+
+function renderSalesOrders() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const orders = res.data.orders || [];
+
+      const buyers   = (ERP.dropdowns && ERP.dropdowns.buyers) || [];
+      const buyerMap = {};
+      buyers.forEach(function(b) { buyerMap[b.id] = b.name; });
+
+      const enriched = orders.map(function(o) {
+        return Object.assign({}, o, { BuyerName: buyerMap[o.BuyerID] || o.BuyerID });
+      });
+
+      const html = renderDataTable({
+        data:      enriched,
+        title:     'Sales Orders',
+        subtitle:  'All buyer sales orders',
+        addLabel:  'New Sales Order',
+        onAdd:     'openCreateSO',
+        idKey:     'SOID',
+        onView:    'viewSO',
+        columns: [
+          { key: 'SOID',         label: 'SO Number' },
+          { key: 'BuyerName',    label: 'Buyer' },
+          { key: 'SODate',       label: 'SO Date',       render: function(v) { return fmtDate(v); } },
+          { key: 'DeliveryDate', label: 'Delivery Date', render: function(v) { return fmtDate(v); } },
+          { key: 'TotalPieces',  label: 'Total Pcs',     render: function(v) { return fmtNum(v); } },
+          { key: 'Season',       label: 'Season' },
+          { key: 'Status',       label: 'Status',        render: function(v) { return statusBadge(v); } }
+        ]
+      });
+      setPageContent(html);
+    })
+    .withFailureHandler(function() { setPageContent(errorHTML('Failed to load sales orders')); })
+    .serverGetSalesOrders(ERP.token, {});
+}
+
+// ══════════════════════════════════════════════════════════════
+// VIEW SALES ORDER DETAIL
+// ══════════════════════════════════════════════════════════════
+
+function viewSO(soID) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error', 'Error', res.message); return; }
+      const so    = res.data.so;
+      const items = res.data.items || [];
+
+      const buyers   = (ERP.dropdowns && ERP.dropdowns.buyers)   || [];
+      const articles = (ERP.dropdowns && ERP.dropdowns.articles) || [];
+      const buyerMap   = {}; buyers.forEach(function(b)   { buyerMap[b.id]   = b.name; });
+      const articleMap = {}; articles.forEach(function(a) { articleMap[a.id] = a.name + ' (' + a.code + ')'; });
+
+      const statusTransitions = {
+        'Draft':         [['Confirmed','Confirm Order'], ['Cancelled','Cancel']],
+        'Confirmed':     [['In Production','Mark In Production'], ['Cancelled','Cancel']],
+        'In Production': [['Dispatched','Mark Dispatched']],
+        'Dispatched':    [['Closed','Close Order']],
+        'Closed':        [],
+        'Cancelled':     []
+      };
+      const transitions = statusTransitions[so.Status] || [];
+
+      const transitionBtns = transitions.map(function(t) {
+        const cls = t[0] === 'Cancelled' ? 'btn-danger' : 'btn-secondary';
+        return `<button class="btn ${cls}" onclick="changeSOStatus('${escHtml(so.SOID)}','${escHtml(t[0])}')" style="margin-left:8px">${escHtml(t[1])}</button>`;
+      }).join('');
+
+      const itemRows = items.map(function(item) {
+        const artName = articleMap[item.ArticleID] || item.ArticleID;
+        const amount  = (parseFloat(item.Rate) || 0) * (parseInt(item.OrderedQty) || 0);
+        return `
+          <tr>
+            <td>${escHtml(artName)}</td>
+            <td><span class="badge">${escHtml(item.Size)}</span></td>
+            <td>${escHtml(item.Color)}</td>
+            <td style="text-align:right">${fmtNum(item.OrderedQty)}</td>
+            <td style="text-align:right">${item.Rate ? fmtCurrency(item.Rate) : '--'}</td>
+            <td style="text-align:right">${amount ? fmtCurrency(amount) : '--'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const totalAmt = items.reduce(function(s, i) { return s + ((parseFloat(i.Rate)||0) * (parseInt(i.OrderedQty)||0)); }, 0);
+
+      openModal('Sales Order — ' + so.SOID, `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div><label class="form-label">Buyer</label><div class="form-input" style="background:var(--surface2)">${escHtml(buyerMap[so.BuyerID]||so.BuyerID)}</div></div>
+          <div><label class="form-label">Status</label><div>${statusBadge(so.Status)}</div></div>
+          <div><label class="form-label">SO Date</label><div class="form-input" style="background:var(--surface2)">${fmtDate(so.SODate)}</div></div>
+          <div><label class="form-label">Delivery Date</label><div class="form-input" style="background:var(--surface2)">${fmtDate(so.DeliveryDate)}</div></div>
+          <div><label class="form-label">Season</label><div class="form-input" style="background:var(--surface2)">${escHtml(so.Season||'--')}</div></div>
+          <div><label class="form-label">Total Pieces</label><div class="form-input" style="background:var(--surface2);font-weight:700">${fmtNum(so.TotalPieces)}</div></div>
+        </div>
+
+        ${so.Remarks ? `<div style="margin-bottom:16px"><label class="form-label">Remarks</label><div class="form-input" style="background:var(--surface2)">${escHtml(so.Remarks)}</div></div>` : ''}
+
+        <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary)">Order Items (${items.length})</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead>
+              <tr><th>Article</th><th>Size</th><th>Color</th><th style="text-align:right">Qty (Pcs)</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr>
+            </thead>
+            <tbody>
+              ${itemRows || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No items</td></tr>'}
+            </tbody>
+            <tfoot>
+              <tr style="font-weight:700;border-top:2px solid var(--border)">
+                <td colspan="3">Total</td>
+                <td style="text-align:right">${fmtNum(so.TotalPieces)}</td>
+                <td></td>
+                <td style="text-align:right">${totalAmt > 0 ? fmtCurrency(totalAmt) : '--'}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      `, `
+        <button class="btn btn-ghost" onclick="_closeModal()">Close</button>
+        ${so.Status === 'Draft' ? `<button class="btn btn-secondary" onclick="_closeModal();openCreateSO('${escHtml(so.SOID)}')">Edit Order</button>` : ''}
+        ${transitionBtns}
+      `, 'large');
+    })
+    .withFailureHandler(function() { showToast('error', 'Error', 'Failed to load SO'); })
+    .serverGetSalesOrderByID(ERP.token, soID);
+}
+
+function changeSOStatus(soID, newStatus) {
+  const confirmMsg = newStatus === 'Cancelled'
+    ? 'Cancel this Sales Order? This cannot be undone.'
+    : 'Move Sales Order to status: ' + newStatus + '?';
+
+  showConfirm('Update Status', confirmMsg, function() {
+    _closeModal();
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { showToast('error', 'Error', res.message); return; }
+        showToast('success', 'Status Updated', 'Order status changed to ' + newStatus);
+        renderSalesOrders();
+      })
+      .withFailureHandler(function() { showToast('error', 'Error', 'Failed to update status'); })
+      .serverUpdateSOStatus(ERP.token, soID, newStatus);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// CREATE / EDIT SALES ORDER
+// ══════════════════════════════════════════════════════════════
+
+var SO_ITEM_STATE = { rows: [], counter: 0 };
+
+function openCreateSO(soID) {
+  SO_ITEM_STATE = { rows: [], counter: 0 };
+
+  if (soID) {
+    // Edit mode: reload dropdowns first, then load SO data
+    loadDropdowns(function() {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res.success) { showToast('error', 'Error', res.message); return; }
+          const so    = res.data.so;
+          const items = res.data.items || [];
+          items.forEach(function(item) {
+            SO_ITEM_STATE.rows.push({
+              id:        '_' + (++SO_ITEM_STATE.counter),
+              itemID:    item.SOItemID,
+              articleID: item.ArticleID,
+              size:      item.Size,
+              color:     item.Color,
+              qty:       item.OrderedQty,
+              rate:      item.Rate
+            });
+          });
+          openSOModal(so, so.SOID);
+        })
+        .withFailureHandler(function() { showToast('error', 'Error', 'Failed to load SO'); })
+        .serverGetSalesOrderByID(ERP.token, soID);
+    });
+  } else {
+    // Reload dropdowns first to get latest buyers/articles
+    loadDropdowns(function() { openSOModal(null, null); });
+  }
+}
+
+function openSOModal(so, editID) {
+  const s          = so || {};
+  const buyers     = (ERP.dropdowns && ERP.dropdowns.buyers) || [];
+  const buyerOpts  = buyers.map(function(b) {
+    return `<option value="${escHtml(b.id)}" ${s.BuyerID===b.id?'selected':''}>${escHtml(b.name)}</option>`;
+  }).join('');
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  openModal(editID ? 'Edit Sales Order — ' + editID : 'New Sales Order', `
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Buyer</label>
+        <select class="form-select" id="soBuyer">
+          <option value="">-- Select Buyer --</option>
+          ${buyerOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Season</label>
+        <input class="form-input" id="soSeason" value="${escHtml(s.Season||'')}" placeholder="e.g. SS2026">
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">SO Date</label>
+        <input class="form-input" id="soDate" type="date" value="${s.SODate ? s.SODate.slice(0,10) : today}">
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Delivery Date</label>
+        <input class="form-input" id="soDelivery" type="date" value="${s.DeliveryDate ? s.DeliveryDate.slice(0,10) : ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Remarks</label>
+      <textarea class="form-textarea" id="soRemarks" placeholder="Optional remarks">${escHtml(s.Remarks||'')}</textarea>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px">
+      <div style="font-weight:600">Order Items</div>
+      <button class="btn btn-ghost" style="font-size:12px" onclick="addSOItemRow()">+ Add Item</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="min-width:180px">Article *</th>
+            <th style="min-width:80px">Size *</th>
+            <th style="min-width:110px">Color *</th>
+            <th style="min-width:90px">Qty (Pcs) *</th>
+            <th style="min-width:90px">Rate</th>
+            <th style="min-width:90px">Amount</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="soItemTableBody">
+          ${SO_ITEM_STATE.rows.map(function(row) { return renderSOItemRow(row); }).join('')}
+          ${SO_ITEM_STATE.rows.length===0 ? '<tr id="soEmptyRow"><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No items. Click "+ Add Item".</td></tr>' : ''}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:8px">
+      <span style="font-size:13px;color:var(--text-muted)" id="soTotalLabel">Total: 0 pcs</span>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="_closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveSO('${editID||''}')">
+      ${editID ? 'Update Order' : 'Create Order'}
+    </button>
+  `, 'large');
+
+  updateSOTotal();
+}
+
+function renderSOItemRow(row) {
+  const rid      = row.id;
+  const articles = (ERP.dropdowns && ERP.dropdowns.articles) || [];
+  const sizes    = (ERP.dropdowns && ERP.dropdowns.sizes)    || [];
+
+  const artOpts  = articles.map(function(a) {
+    return `<option value="${escHtml(a.id)}" ${row.articleID===a.id?'selected':''}>${escHtml(a.code)} — ${escHtml(a.name)}</option>`;
+  }).join('');
+  const sizeOpts = sizes.map(function(s) {
+    return `<option value="${escHtml(s)}" ${row.size===s?'selected':''}>${escHtml(s)}</option>`;
+  }).join('');
+
+  const amount = (parseFloat(row.rate)||0) * (parseInt(row.qty)||0);
+
+  return `
+    <tr id="soItemRow_${rid}" data-rowid="${rid}">
+      <td><select class="form-select" id="soArticle_${rid}" style="min-width:170px">
+        <option value="">-- Select Article --</option>
+        ${artOpts}
+      </select></td>
+      <td><select class="form-select" id="soSize_${rid}" style="min-width:70px">
+        <option value="">--</option>${sizeOpts}
+      </select></td>
+      <td><input class="form-input" id="soColor_${rid}" value="${escHtml(row.color||'')}" placeholder="e.g. White" style="min-width:100px"></td>
+      <td><input class="form-input" id="soQty_${rid}" type="number" min="1" step="1" value="${row.qty||''}"
+          style="min-width:70px" oninput="updateSOItemAmount('${rid}');updateSOTotal()"></td>
+      <td><input class="form-input" id="soRate_${rid}" type="number" min="0" step="0.01" value="${row.rate||''}"
+          style="min-width:70px" oninput="updateSOItemAmount('${rid}')"></td>
+      <td><span id="soAmt_${rid}" style="font-family:var(--font-mono);font-size:12px">${amount>0?fmtCurrency(amount):'--'}</span></td>
+      <td><button class="action-btn delete" onclick="removeSOItemRow('${rid}')" title="Remove">✕</button></td>
+    </tr>
+  `;
+}
+
+function addSOItemRow() {
+  const emptyRow = document.getElementById('soEmptyRow');
+  if (emptyRow) emptyRow.remove();
+
+  const rid = '_' + (++SO_ITEM_STATE.counter);
+  const row = { id: rid, itemID: '', articleID: '', size: '', color: '', qty: '', rate: '' };
+  SO_ITEM_STATE.rows.push(row);
+
+  const tbody = document.getElementById('soItemTableBody');
+  const tr    = document.createElement('tr');
+  tr.id              = 'soItemRow_' + rid;
+  tr.dataset.rowid   = rid;
+  tr.innerHTML       = renderSOItemRow(row).replace(/^<tr[^>]*>/, '').replace(/<\/tr>$/, '');
+  tbody.appendChild(tr);
+}
+
+function removeSOItemRow(rid) {
+  SO_ITEM_STATE.rows = SO_ITEM_STATE.rows.filter(function(r) { return r.id !== rid; });
+  const tr = document.getElementById('soItemRow_' + rid);
+  if (tr) tr.remove();
+  updateSOTotal();
+  if (document.getElementById('soItemTableBody').children.length === 0) {
+    const tr2 = document.createElement('tr');
+    tr2.id = 'soEmptyRow';
+    tr2.innerHTML = '<td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No items. Click "+ Add Item".</td>';
+    document.getElementById('soItemTableBody').appendChild(tr2);
+  }
+}
+
+function updateSOItemAmount(rid) {
+  const qty  = parseFloat(document.getElementById('soQty_'  + rid).value) || 0;
+  const rate = parseFloat(document.getElementById('soRate_' + rid).value) || 0;
+  const amt  = qty * rate;
+  document.getElementById('soAmt_' + rid).textContent = amt > 0 ? fmtCurrency(amt) : '--';
+}
+
+function updateSOTotal() {
+  const rows = document.querySelectorAll('#soItemTableBody tr[data-rowid]');
+  let total  = 0;
+  rows.forEach(function(tr) {
+    const rid = tr.dataset.rowid;
+    total += parseInt(document.getElementById('soQty_' + rid).value) || 0;
+  });
+  const lbl = document.getElementById('soTotalLabel');
+  if (lbl) lbl.textContent = 'Total: ' + fmtNum(total) + ' pcs';
+}
+
+function saveSO(editID) {
+  const buyerID      = document.getElementById('soBuyer').value;
+  const soDate       = document.getElementById('soDate').value;
+  const deliveryDate = document.getElementById('soDelivery').value;
+  const season       = document.getElementById('soSeason').value.trim();
+  const remarks      = document.getElementById('soRemarks').value.trim();
+
+  if (!buyerID)      { showToast('warning', 'Validation', 'Please select a Buyer'); return; }
+  if (!soDate)       { showToast('warning', 'Validation', 'SO Date is required'); return; }
+  if (!deliveryDate) { showToast('warning', 'Validation', 'Delivery Date is required'); return; }
+  if (deliveryDate < soDate) { showToast('warning', 'Validation', 'Delivery Date must be after SO Date'); return; }
+
+  const rows    = document.querySelectorAll('#soItemTableBody tr[data-rowid]');
+  const items   = [];
+  let hasError  = false;
+
+  rows.forEach(function(tr) {
+    if (hasError) return;
+    const rid = tr.dataset.rowid;
+    const articleID = document.getElementById('soArticle_' + rid).value;
+    const size      = document.getElementById('soSize_'    + rid).value;
+    const color     = document.getElementById('soColor_'   + rid).value.trim();
+    const qty       = document.getElementById('soQty_'     + rid).value;
+    const rate      = document.getElementById('soRate_'    + rid).value;
+
+    if (!articleID || !size || !color || !qty) {
+      showToast('warning', 'Validation', 'All item fields (Article, Size, Color, Qty) are required');
+      hasError = true;
+      return;
+    }
+    if (parseInt(qty) < 1) {
+      showToast('warning', 'Validation', 'Quantity must be at least 1');
+      hasError = true;
+      return;
+    }
+    items.push({ ArticleID: articleID, Size: size, Color: color, OrderedQty: parseInt(qty), Rate: rate ? parseFloat(rate) : 0 });
+  });
+
+  if (hasError) return;
+  if (items.length === 0) { showToast('warning', 'Validation', 'At least one item is required'); return; }
+
+  const data = { BuyerID: buyerID, SODate: soDate, DeliveryDate: deliveryDate, Season: season, Remarks: remarks, items: items };
+
+  const btn = document.querySelector('#globalModal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  function onSaveSuccess(res) {
+    if (!res.success) {
+      showToast('error', 'Error', res.message);
+      if (btn) { btn.disabled = false; btn.textContent = editID ? 'Update Order' : 'Create Order'; }
+      return;
+    }
+    showToast('success', 'Success', editID ? 'Order updated' : 'Sales Order created');
+    _closeModal();
+    renderSalesOrders();
+  }
+  function onSaveFail() {
+    showToast('error', 'Error', 'Failed to save');
+    if (btn) btn.disabled = false;
+  }
+  if (editID) {
+    google.script.run.withSuccessHandler(onSaveSuccess).withFailureHandler(onSaveFail)
+      .serverUpdateSalesOrder(ERP.token, editID, data);
+  } else {
+    google.script.run.withSuccessHandler(onSaveSuccess).withFailureHandler(onSaveFail)
+      .serverCreateSalesOrder(ERP.token, data);
+  }
+}
+</script>

@@ -1,0 +1,1042 @@
+<script>
+// ============================================================
+// JavaScript.html — Client-Side Application Logic
+// SPA Router, Auth, UI Utilities, Page Loader
+// ============================================================
+
+// ── Global State ───────────────────────────────────────────
+const ERP = {
+  token: null,
+  user: null,
+  currentPage: null,
+  dropdowns: null,
+  sortState: {},
+  confirmCallback: null
+};
+
+// Alias so both old (ERP.x) and new (appState.x) code works
+const appState = ERP;
+
+// ── Dropdown Helper ─────────────────────────────────────────
+// populateDropdown(selectId, items)
+// items: array of {value, label} OR plain strings
+function populateDropdown(selectId, items, placeholder) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const ph = placeholder || '— Select —';
+  sel.innerHTML = `<option value="">${ph}</option>`;
+  (items || []).forEach(function(item) {
+    const opt = document.createElement('option');
+    if (typeof item === 'object') {
+      opt.value       = item.value || item.id || '';
+      opt.textContent = item.label || item.name || opt.value;
+    } else {
+      opt.value = opt.textContent = item;
+    }
+    sel.appendChild(opt);
+  });
+}
+
+
+// ── Session Storage ─────────────────────────────────────────
+function saveSession(token, user) {
+  // Use sessionStorage so it clears on tab close but persists on refresh
+  // Full persistence until logout uses localStorage
+  localStorage.setItem('erp_token', token);
+  localStorage.setItem('erp_user', JSON.stringify(user));
+  ERP.token = token;
+  ERP.user = user;
+}
+
+function loadSession() {
+  const token = localStorage.getItem('erp_token');
+  const userStr = localStorage.getItem('erp_user');
+  if (token && userStr) {
+    try {
+      ERP.token = token;
+      ERP.user = JSON.parse(userStr);
+      return true;
+    } catch(e) { clearSession(); }
+  }
+  return false;
+}
+
+function clearSession() {
+  localStorage.removeItem('erp_token');
+  localStorage.removeItem('erp_user');
+  ERP.token = null;
+  ERP.user = null;
+}
+
+// ── App Init ────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', function() {
+  updateTopbarDate();
+  setInterval(updateTopbarDate, 60000);
+  initTheme();
+
+  if (loadSession()) {
+    // Validate session with server
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          ERP.user = res.data;
+          saveSession(ERP.token, ERP.user);
+          showMainApp();
+        } else {
+          clearSession();
+          showLoginScreen();
+        }
+      })
+      .withFailureHandler(function() {
+        clearSession();
+        showLoginScreen();
+      })
+      .serverGetCurrentUser(ERP.token);
+  } else {
+    showLoginScreen();
+  }
+});
+
+// ── Login / Logout ──────────────────────────────────────────
+function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+
+  if (!email || !password) {
+    showLoginError('Please enter your email and password.');
+    return;
+  }
+
+  setLoginLoading(true);
+  hideLoginError();
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      setLoginLoading(false);
+      if (res.success) {
+        saveSession(res.data.token, res.data.user);
+        showMainApp();
+      } else {
+        showLoginError(res.message);
+      }
+    })
+    .withFailureHandler(function(err) {
+      setLoginLoading(false);
+      showLoginError('Connection error. Please try again.');
+    })
+    .serverLogin(email, password);
+}
+
+function doLogout() {
+  if (!ERP.token) { showLoginScreen(); return; }
+  google.script.run
+    .withSuccessHandler(function() {})
+    .withFailureHandler(function() {})
+    .serverLogout(ERP.token);
+  clearSession();
+  showLoginScreen();
+}
+
+function setLoginLoading(loading) {
+  const btn = document.getElementById('loginBtn');
+  const txt = document.getElementById('loginBtnText');
+  const spin = document.getElementById('loginSpinner');
+  btn.disabled = loading;
+  txt.textContent = loading ? 'Signing in...' : 'Sign In';
+  spin.style.display = loading ? 'inline-block' : 'none';
+}
+
+function showLoginError(msg) {
+  const el = document.getElementById('loginError');
+  el.textContent = msg;
+  el.style.display = 'flex';
+}
+
+function hideLoginError() {
+  document.getElementById('loginError').style.display = 'none';
+}
+
+function togglePassword() {
+  const input = document.getElementById('loginPassword');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// Enter key on login form
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const loginScreen = document.getElementById('loginScreen');
+    if (loginScreen && loginScreen.style.display !== 'none') {
+      doLogin();
+    }
+  }
+});
+
+// ── Show / Hide Screens ──────────────────────────────────────
+function showLoginScreen() {
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginPassword').value = '';
+  hideLoginError();
+}
+
+function showMainApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'flex';
+  setupUserDisplay();
+  setupNavForRole();
+  loadDropdowns();
+  navigate('dashboard');
+}
+
+function setupUserDisplay() {
+  if (!ERP.user) return;
+  const name = ERP.user.fullName || '';
+  const role = ERP.user.role || '';
+  document.getElementById('sidebarUserName').textContent = name;
+  document.getElementById('sidebarUserRole').textContent = role;
+  const initials = name.split(' ').map(function(n) { return n[0]; }).join('').substring(0, 2).toUpperCase();
+  document.getElementById('userAvatar').textContent = initials;
+}
+
+function setupNavForRole() {
+  if (!ERP.user) return;
+  const role = ERP.user.role;
+  const isAdmin = role === 'Super Admin' || role === 'Admin';
+  // Hide admin-only items for non-admins
+  document.querySelectorAll('.admin-only').forEach(function(el) {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+}
+
+// ── Dropdowns (preload) ──────────────────────────────────────
+function loadDropdowns(callback) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res.success) {
+        ERP.dropdowns = res.data;
+      }
+      if (callback) callback();
+    })
+    .withFailureHandler(function() {
+      if (callback) callback();
+    })
+    .serverGetDropdowns(ERP.token);
+}
+
+// ── Navigation / Router ──────────────────────────────────────
+const PAGE_TITLES = {
+  dashboard:      'Dashboard',
+  buyers:         'Buyer Master',
+  articles:       'Article / Style Master',
+  bom:            'Bill of Materials',
+  fabrics:        'Fabric Master',
+  vendors:        'Vendor Master',
+  salesorders:    'Sales Orders',
+  purchaseorders: 'Purchase Orders',
+  grn:            'Goods Receipt (GRN)',
+  inventory:      'Current Stock',
+  fabricissue:    'Fabric Issue',
+  ledger:         'Stock Ledger',
+  productionplan: 'Production Planning',
+  bundles:        'Bundle Management',
+  cutting:        'Cutting Entry',
+  stitching:      'Stitching Entry',
+  finishing:      'Finishing Entry',
+  packing:        'Packing Entry',
+  fabricator:     'Fabricator Job Work',
+  dispatch:       'Dispatch',
+  returns:        'Returns',
+  reports:        'Reports & Dashboards',
+  users:          'User Management',
+  auditlogs:      'Audit Logs',
+  settings:       'Settings'
+};
+
+function navigate(page) {
+  ERP.currentPage = page;
+
+  // Update active nav
+  document.querySelectorAll('.nav-item, .nav-subitem').forEach(function(el) {
+    el.classList.remove('active');
+  });
+
+  const navEl = document.querySelector('[data-page="' + page + '"]');
+  if (navEl) navEl.classList.add('active');
+
+  // Update breadcrumb
+  const title = PAGE_TITLES[page] || page;
+  document.getElementById('breadcrumb').innerHTML = '<span>' + title + '</span>';
+
+  // Close mobile sidebar
+  closeMobileSidebar();
+
+  // Show loader
+  showPageLoader();
+
+  // Load page content
+  loadPage(page);
+}
+
+function showPageLoader() {
+  document.getElementById('pageContent').innerHTML =
+    '<div class="page-loader"><div class="loader-spinner"></div><p>Loading...</p></div>';
+}
+
+function refreshCurrentPage() {
+  if (ERP.currentPage) navigate(ERP.currentPage);
+}
+
+// ── Page Loader ──────────────────────────────────────────────
+function loadPage(page) {
+  switch(page) {
+    case 'dashboard':      renderDashboard();      break;
+    case 'buyers':         renderBuyers();         break;
+    case 'articles':       renderArticles();       break;
+    case 'bom':            renderBOM();            break;
+    case 'fabrics':        renderFabrics();        break;
+    case 'vendors':        renderVendors();        break;
+    case 'salesorders':    renderSalesOrders();    break;
+    case 'purchaseorders': renderPurchaseOrders(); break;
+    case 'grn':            renderGRN();            break;
+    case 'inventory':      renderInventory();      break;
+    case 'fabricissue':    renderFabricIssue();    break;
+    case 'ledger':         renderLedger();         break;
+    case 'productionplan': renderProductionPlan(); break;
+    case 'bundles':        renderBundles();        break;
+    case 'cutting':        renderProcess('Cutting');    break;
+    case 'stitching':      renderProcess('Stitching');  break;
+    case 'finishing':      renderProcess('Finishing');  break;
+    case 'packing':        renderProcess('Packing');    break;
+    case 'fabricator':     renderFabricator();     break;
+    case 'dispatch':       renderDispatch();       break;
+    case 'returns':        renderReturns();        break;
+    case 'reports':        renderReports();        break;
+    case 'users':          renderUsers();          break;
+    case 'auditlogs':      renderAuditLogs();      break;
+    case 'settings':       renderSettings();       break;
+    default:
+      setPageContent('<div class="empty-state"><h3>Page Not Found</h3><p>Navigate using the sidebar.</p></div>');
+  }
+}
+
+function setPageContent(html) {
+  document.getElementById('pageContent').innerHTML = html;
+}
+
+function setPageTitle(title) {
+  document.getElementById('breadcrumb').innerHTML = '<span>' + escHtml(title) + '</span>';
+}
+
+// ── Dashboard ────────────────────────────────────────────────
+function renderDashboard() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const d = res.data;
+      setPageContent(`
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-subtitle">Welcome back, ${escHtml(ERP.user.fullName)} — ${new Date().toLocaleDateString('en-IN', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card blue" onclick="navigate('salesorders')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3z"/></svg></div>
+            <div class="stat-value">${d.totalSO || 0}</div>
+            <div class="stat-label">Total Sales Orders</div>
+            <div class="stat-change ${(d.activeSO||0) > 0 ? 'up' : 'down'}">${d.activeSO || 0} Active</div>
+          </div>
+          <div class="stat-card orange" onclick="navigate('purchaseorders')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a4 4 0 00-4 4v1H5a1 1 0 00-.994.89l-1 9A1 1 0 004 18h12a1 1 0 00.994-1.11l-1-9A1 1 0 0015 7h-1V6a4 4 0 00-4-4zm2 5V6a2 2 0 10-4 0v1h4zm-6 3a1 1 0 112 0 1 1 0 01-2 0zm7-1a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd"/></svg></div>
+            <div class="stat-value">${d.totalPO || 0}</div>
+            <div class="stat-label">Purchase Orders</div>
+            <div class="stat-change ${(d.pendingPO||0) > 0 ? 'down' : 'up'}">${d.pendingPO || 0} Pending Receipt</div>
+          </div>
+          <div class="stat-card green" onclick="navigate('inventory')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z"/><path fill-rule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clip-rule="evenodd"/></svg></div>
+            <div class="stat-value">${d.stockItems || 0}</div>
+            <div class="stat-label">Stock Items</div>
+            <div class="stat-change ${(d.lowStock||0) > 0 ? 'down' : 'up'}">${d.lowStock || 0} Low Stock</div>
+          </div>
+          <div class="stat-card purple" onclick="navigate('bundles')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 17a1 1 0 001.447.894l4-2A1 1 0 0017 15V9.236a1 1 0 00-1.447-.894l-4 2a1 1 0 00-.553.894V17zM15.211 6.276a1 1 0 000-1.788l-4.764-2.382a1 1 0 00-.894 0L4.789 4.488a1 1 0 000 1.788l4.764 2.382a1 1 0 00.894 0l4.764-2.382zM4.447 8.342A1 1 0 003 9.236V15a1 1 0 00.553.894l4 2A1 1 0 009 17v-5.764a1 1 0 00-.553-.894l-4-2z"/></svg></div>
+            <div class="stat-value">${d.activeBundles || 0}</div>
+            <div class="stat-label">Active Bundles</div>
+            <div class="stat-change up">${d.packedBundles || 0} Packed</div>
+          </div>
+          <div class="stat-card teal" onclick="navigate('dispatch')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/><path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3z"/></svg></div>
+            <div class="stat-value">${d.thisMonthDispatch || 0}</div>
+            <div class="stat-label">Dispatched This Month</div>
+            <div class="stat-change up">${d.totalPieces || 0} Pieces</div>
+          </div>
+          <div class="stat-card red" onclick="navigate('returns')" style="cursor:pointer">
+            <div class="stat-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg></div>
+            <div class="stat-value">${d.pendingReturns || 0}</div>
+            <div class="stat-label">Pending Returns</div>
+            <div class="stat-change ${(d.pendingReturns||0) > 0 ? 'down' : 'up'}">${d.pendingReturns || 0} Open</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Production Status</span>
+            </div>
+            ${renderProductionStatus(d.productionStatus || [])}
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Quick Actions</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <button class="btn btn-primary" onclick="navigate('purchaseorders')">+ New Purchase Order</button>
+              <button class="btn btn-secondary" onclick="navigate('fabricissue')">+ Issue Fabric</button>
+              <button class="btn btn-secondary" onclick="navigate('bundles')">+ Create Bundle</button>
+              <button class="btn btn-secondary" onclick="navigate('dispatch')">+ New Dispatch</button>
+              <button class="btn btn-ghost" onclick="navigate('reports')">View Reports</button>
+            </div>
+          </div>
+        </div>
+      `);
+    })
+    .withFailureHandler(function(e) { setPageContent(errorHTML('Failed to load dashboard')); })
+    .serverGetHomeDashboard(ERP.token);
+}
+
+function renderProductionStatus(data) {
+  if (!data.length) return '<p style="color:var(--text-muted);text-align:center;padding:20px">No active production plans</p>';
+  return data.map(function(item) {
+    const pct = Math.min(100, Math.round((item.completed / item.total) * 100)) || 0;
+    return `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:500">${escHtml(item.label)}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${item.completed}/${item.total}</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill ${item.color||''}" style="width:${pct}%"></div></div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Generic Table Renderer ───────────────────────────────────
+function renderDataTable(config) {
+  // New-style: config has containerId + tableId → renders directly into DOM
+  if (config.containerId) {
+    const container = document.getElementById(config.containerId);
+    if (!container) return;
+    const { tableId, columns, data } = config;
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="empty-state"><span class="empty-icon">📋</span><p>No records found</p></div>';
+      return;
+    }
+    const headers = columns.map(function(c) { return '<th>' + escHtml(c.label) + '</th>'; }).join('');
+    const rows = data.map(function(row) {
+      const cells = columns.map(function(col) {
+        let val = row[col.key];
+        if (col.render) val = col.render(val, row);
+        else val = escHtml(val != null ? String(val) : '');
+        return '<td>' + val + '</td>';
+      }).join('');
+      return '<tr>' + cells + '</tr>';
+    }).join('');
+    container.innerHTML = '<div class="table-scroll"><table class="data-table" id="' + (tableId||'dataTable') + '"><thead><tr>' + headers + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return;
+  }
+  // Old-style: returns HTML string
+  const { data, columns, onAdd, onEdit, onView, onDelete, searchKey, title, subtitle, addLabel, extraActions } = config;
+
+  let tableHTML = '';
+  if (!data || data.length === 0) {
+    tableHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg></div>
+        <h3>No Records Found</h3>
+        <p>Click "${addLabel || 'Add New'}" to create the first record.</p>
+        ${onAdd ? `<button class="btn btn-primary" onclick="${onAdd}()">+ ${addLabel || 'Add New'}</button>` : ''}
+      </div>`;
+  } else {
+    const rows = data.map(function(row, idx) {
+      const cells = columns.map(function(col) {
+        let val = row[col.key];
+        if (col.render) val = col.render(val, row);
+        else val = escHtml(val != null ? String(val) : '');
+        return `<td>${val}</td>`;
+      }).join('');
+
+      let actions = '';
+      if (onView || onEdit || onDelete || extraActions) {
+        actions += '<td><div class="action-row">';
+        if (onView) actions += `<button class="action-btn view" onclick="${onView}('${row[config.idKey || 'id']}')" title="View"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg></button>`;
+        if (onEdit) actions += `<button class="action-btn edit" onclick="${onEdit}('${row[config.idKey || 'id']}')" title="Edit"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg></button>`;
+        if (onDelete) actions += `<button class="action-btn delete" onclick="${onDelete}('${row[config.idKey || 'id']}')" title="Delete"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg></button>`;
+        if (extraActions) actions += extraActions(row);
+        actions += '</div></td>';
+      }
+
+      return `<tr>${cells}${actions}</tr>`;
+    }).join('');
+
+    const headers = columns.map(function(col) {
+      return `<th onclick="sortTable('${col.key}')">${escHtml(col.label)}</th>`;
+    });
+    if (onView || onEdit || onDelete || extraActions) headers.push('<th>Actions</th>');
+
+    tableHTML = `
+      <div class="table-wrapper">
+        <table id="dataTable">
+          <thead><tr>${headers.join('')}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  return `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">${escHtml(title)}</h1>
+        ${subtitle ? `<p class="page-subtitle">${escHtml(subtitle)}</p>` : ''}
+      </div>
+      <div class="page-actions">
+        ${onAdd ? `<button class="btn btn-primary" onclick="${onAdd}()">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+          ${escHtml(addLabel || 'Add New')}
+        </button>` : ''}
+      </div>
+    </div>
+    <div class="table-container">
+      <div class="table-toolbar">
+        <div class="table-search">
+          <input type="text" class="search-input" placeholder="Search..." oninput="filterTable(this.value)" id="tableSearchInput">
+        </div>
+        <div style="font-size:12px;color:var(--text-muted)">${data ? data.length : 0} records</div>
+      </div>
+      ${tableHTML}
+      ${data && data.length > 0 ? renderPagination(data.length) : ''}
+    </div>
+  `;
+}
+
+// ── Table Sort ───────────────────────────────────────────────
+function sortTable(key) {
+  const table = document.getElementById('dataTable');
+  if (!table) return;
+  const dir = ERP.sortState[key] === 'asc' ? 'desc' : 'asc';
+  ERP.sortState = {};
+  ERP.sortState[key] = dir;
+
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const colIdx = headers.findIndex(function(h) { return h.textContent.trim().toLowerCase() === key.toLowerCase() || h.onclick && String(h.onclick).includes("'" + key + "'"); });
+
+  rows.sort(function(a, b) {
+    const aVal = a.cells[colIdx] ? a.cells[colIdx].textContent.trim() : '';
+    const bVal = b.cells[colIdx] ? b.cells[colIdx].textContent.trim() : '';
+    const aNum = parseFloat(aVal); const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) return dir === 'asc' ? aNum - bNum : bNum - aNum;
+    return dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+  });
+
+  rows.forEach(function(r) { tbody.appendChild(r); });
+
+  headers.forEach(function(h, i) {
+    h.classList.remove('sort-asc', 'sort-desc');
+    if (i === colIdx) h.classList.add('sort-' + dir);
+  });
+}
+
+// ── Table Filter ─────────────────────────────────────────────
+// Supports both: filterTable(query) and filterTable(tableId, query)
+function filterTable(tableIdOrQuery, query) {
+  let tableId, q;
+  if (query === undefined) {
+    tableId = 'dataTable';
+    q = (tableIdOrQuery || '').toLowerCase();
+  } else {
+    tableId = tableIdOrQuery;
+    q = (query || '').toLowerCase();
+  }
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const rows = table.querySelectorAll('tbody tr');
+  rows.forEach(function(row) {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+// ── Pagination ───────────────────────────────────────────────
+let currentPage = 1;
+const PAGE_SIZE = 25;
+
+function renderPagination(total) {
+  const pages = Math.ceil(total / PAGE_SIZE);
+  if (pages <= 1) return '';
+  return `
+    <div class="table-pagination">
+      <span>Showing ${Math.min(PAGE_SIZE, total)} of ${total} records</span>
+      <div class="pagination-btns">
+        <button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>‹</button>
+        <button class="page-btn active">${currentPage}</button>
+        <button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage >= pages ? 'disabled' : ''}>›</button>
+      </div>
+    </div>
+  `;
+}
+
+function goToPage(page) {
+  currentPage = page;
+  refreshCurrentPage();
+}
+
+// ── Modal ────────────────────────────────────────────────────
+function openModal(title, bodyHTML, footerHTML, size) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHTML;
+  document.getElementById('modalFooter').innerHTML = footerHTML || '';
+  const modal = document.getElementById('globalModal');
+  modal.className = 'modal' + (size ? ' modal-' + size : '');
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function closeModal(event) {
+  if (event && event.target !== document.getElementById('modalOverlay')) return;
+  _closeModal();
+}
+
+function _closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+  document.getElementById('modalOverlay').style.display = 'none';
+}
+
+// ── Confirm Dialog ───────────────────────────────────────────
+// Supports both: showConfirm(message, cb) and showConfirm(title, message, cb, danger)
+function showConfirm(titleOrMessage, messageOrCb, onConfirm, danger) {
+  let title, message, cb;
+  if (typeof messageOrCb === 'function') {
+    // Called as showConfirm(message, callback)
+    title   = 'Confirm Action';
+    message = titleOrMessage;
+    cb      = messageOrCb;
+  } else {
+    // Called as showConfirm(title, message, callback, danger)
+    title   = titleOrMessage;
+    message = messageOrCb;
+    cb      = onConfirm;
+  }
+  document.getElementById('confirmTitle').textContent   = title;
+  document.getElementById('confirmMessage').textContent = message;
+  const btn = document.getElementById('confirmOkBtn');
+  btn.className  = 'btn ' + (danger !== false ? 'btn-danger' : 'btn-primary');
+  btn.textContent = danger !== false ? 'Confirm' : 'Confirm';
+  ERP.confirmCallback = cb;
+  document.getElementById('confirmOverlay').style.display = 'flex';
+}
+
+function acceptConfirm() {
+  document.getElementById('confirmOverlay').style.display = 'none';
+  if (ERP.confirmCallback) {
+    ERP.confirmCallback();
+    ERP.confirmCallback = null;
+  }
+}
+
+function cancelConfirm() {
+  document.getElementById('confirmOverlay').style.display = 'none';
+  ERP.confirmCallback = null;
+}
+
+// ── Toast Notifications ──────────────────────────────────────
+// Supports both:
+//   showToast('success', 'Title', 'message')  — old style
+//   showToast('message text', 'success')       — new style
+function showToast(typeOrMessage, titleOrType, message, duration) {
+  let type, title, msg;
+  const validTypes = ['success', 'error', 'warning', 'info'];
+
+  if (validTypes.includes(typeOrMessage)) {
+    // Old style: showToast(type, title, message)
+    type  = typeOrMessage;
+    title = titleOrType;
+    msg   = message;
+  } else if (validTypes.includes(titleOrType)) {
+    // New style: showToast(message, type)
+    type  = titleOrType;
+    title = typeOrMessage;
+    msg   = '';
+  } else {
+    // Fallback
+    type  = 'info';
+    title = typeOrMessage;
+    msg   = '';
+  }
+
+  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || '•'}</span>
+    <div class="toast-body">
+      <div class="toast-title">${escHtml(title)}</div>
+      ${msg ? `<div class="toast-message">${escHtml(msg)}</div>` : ''}
+    </div>
+    <button class="toast-close" onclick="removeToast(this.parentElement)">×</button>
+  `;
+  container.appendChild(toast);
+  setTimeout(function() { removeToast(toast); }, duration || 4000);
+}
+
+function removeToast(el) {
+  if (!el || !el.parentElement) return;
+  el.classList.add('removing');
+  setTimeout(function() { if (el.parentElement) el.parentElement.removeChild(el); }, 300);
+}
+
+// ── Sidebar Toggle ───────────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const isMobile = window.innerWidth <= 768;
+
+  if (isMobile) {
+    sidebar.classList.toggle('mobile-open');
+    let backdrop = document.getElementById('sidebarBackdrop');
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.id = 'sidebarBackdrop';
+      backdrop.className = 'sidebar-backdrop';
+      backdrop.onclick = closeMobileSidebar;
+      document.body.appendChild(backdrop);
+    }
+    backdrop.classList.toggle('visible', sidebar.classList.contains('mobile-open'));
+  } else {
+    sidebar.classList.toggle('collapsed');
+    const content = document.getElementById('mainContent');
+    // CSS handles margin via sibling selector
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  if (backdrop) backdrop.classList.remove('visible');
+}
+
+function toggleSubmenu(el) {
+  const submenu = el.nextElementSibling;
+  if (!submenu || !submenu.classList.contains('nav-submenu')) return;
+  el.classList.toggle('open');
+  submenu.classList.toggle('open');
+}
+
+// ── Topbar Date ──────────────────────────────────────────────
+function updateTopbarDate() {
+  const el = document.getElementById('topbarDate');
+  if (el) {
+    const now = new Date();
+    el.textContent = now.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) +
+      ' ' + now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+  }
+}
+
+// ── Status Badge Helper ──────────────────────────────────────
+function statusBadge(status) {
+  const map = {
+    'Active': 'badge-success', 'Inactive': 'badge-muted',
+    'Draft': 'badge-muted', 'Approved': 'badge-info',
+    'Partially Received': 'badge-warning', 'Fully Received': 'badge-success',
+    'Closed': 'badge-muted', 'Cancelled': 'badge-danger',
+    'Confirmed': 'badge-info', 'In Production': 'badge-warning',
+    'Dispatched': 'badge-success', 'Delivered': 'badge-success',
+    'Planned': 'badge-info', 'In Progress': 'badge-warning',
+    'Completed': 'badge-success', 'On Hold': 'badge-danger',
+    'Cutting': 'badge-warning', 'Stitching': 'badge-warning',
+    'Finishing': 'badge-warning', 'Packing': 'badge-warning',
+    'Pending': 'badge-muted', 'Done': 'badge-success',
+    'Issued': 'badge-info', 'Locked': 'badge-danger',
+    'Open': 'badge-info', 'Received': 'badge-success',
+    'Inspected': 'badge-warning', 'Restocked': 'badge-success',
+    'Rejected': 'badge-danger'
+  };
+  const cls = map[status] || 'badge-muted';
+  return `<span class="badge ${cls}">${escHtml(status || '--')}</span>`;
+}
+
+// ── HTML Escape ──────────────────────────────────────────────
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ── Format Helpers ───────────────────────────────────────────
+function fmtDate(d) {
+  if (!d) return '--';
+  const dt = new Date(d);
+  if (isNaN(dt)) return '--';
+  return dt.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+function fmtNum(n, decimals) {
+  if (n == null || n === '') return '--';
+  var d = (decimals !== undefined) ? decimals : 2;
+  return parseFloat(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: d });
+}
+
+function fmtCurrency(n) {
+  if (n == null || n === '') return '--';
+  return '₹' + parseFloat(n).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+}
+
+function fmtDateTime(d) {
+  if (!d) return '--';
+  const dt = new Date(d);
+  if (isNaN(dt)) return '--';
+  return dt.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) +
+    ' ' + dt.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+}
+
+// ── Error Page ───────────────────────────────────────────────
+function errorHTML(msg) {
+  return `<div class="empty-state">
+    <div class="empty-state-icon" style="color:var(--red)">
+      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+    </div>
+    <h3>Error Loading Page</h3>
+    <p>${escHtml(msg || 'An error occurred. Please try again.')}</p>
+    <button class="btn btn-secondary" onclick="refreshCurrentPage()">Try Again</button>
+  </div>`;
+}
+
+// ── Server Call Wrapper ──────────────────────────────────────
+function serverCall(fnName, args, onSuccess, onError) {
+  let runner = google.script.run
+    .withSuccessHandler(function(res) {
+      if (res && !res.success) {
+        if (res.code === 'SESSION_INVALID') {
+          clearSession();
+          showLoginScreen();
+          return;
+        }
+        if (onError) onError(res.message);
+        else showToast('error', 'Error', res.message);
+        return;
+      }
+      if (onSuccess) onSuccess(res);
+    })
+    .withFailureHandler(function(err) {
+      const msg = err ? err.message : 'Server error';
+      if (onError) onError(msg);
+      else showToast('error', 'Server Error', msg);
+    });
+
+  const fn = runner[fnName];
+  if (!fn) { showToast('error', 'Error', 'Server function not found: ' + fnName); return; }
+  fn.apply(runner, args || []);
+}
+
+// ── Placeholder page renderers (Modules loaded in subsequent sprints) ──
+
+function renderBuyers() {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { setPageContent(errorHTML(res.message)); return; }
+      const buyers = res.data.buyers || [];
+      const html = renderDataTable({
+        data: buyers,
+        title: 'Buyer Master',
+        subtitle: 'Manage your buyers and customers',
+        addLabel: 'Add Buyer',
+        onAdd: 'openAddBuyer',
+        idKey: 'BuyerID',
+        onEdit: 'openEditBuyer',
+        columns: [
+          { key: 'BuyerID', label: 'Buyer ID' },
+          { key: 'BuyerName', label: 'Buyer Name' },
+          { key: 'BuyerCode', label: 'Code' },
+          { key: 'ContactPerson', label: 'Contact Person' },
+          { key: 'Mobile', label: 'Mobile' },
+          { key: 'Country', label: 'Country' },
+          { key: 'Status', label: 'Status', render: function(v) { return statusBadge(v); } }
+        ]
+      });
+      setPageContent(html);
+    })
+    .withFailureHandler(function(e) { setPageContent(errorHTML('Failed to load buyers')); })
+    .serverGetBuyers(ERP.token);
+}
+
+function openAddBuyer() {
+  openModal('Add New Buyer', getBuyerFormHTML(null), `
+    <button class="btn btn-ghost" onclick="_closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveBuyer()">Save Buyer</button>
+  `);
+}
+
+function openEditBuyer(id) {
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error', 'Error', res.message); return; }
+      const buyers = res.data.buyers || [];
+      const buyer = buyers.find(function(b) { return b.BuyerID === id; });
+      if (!buyer) { showToast('error', 'Error', 'Buyer not found'); return; }
+      openModal('Edit Buyer', getBuyerFormHTML(buyer), `
+        <button class="btn btn-ghost" onclick="_closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveBuyer('${id}')">Update Buyer</button>
+      `);
+    })
+    .withFailureHandler(function() { showToast('error', 'Error', 'Failed to load buyer'); })
+    .serverGetBuyers(ERP.token);
+}
+
+function getBuyerFormHTML(buyer) {
+  const b = buyer || {};
+  return `
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label required">Buyer Name</label>
+        <input class="form-input" id="buyerName" value="${escHtml(b.BuyerName||'')}" placeholder="Enter buyer name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Buyer Code</label>
+        <input class="form-input" id="buyerCode" value="${escHtml(b.BuyerCode||'')}" placeholder="e.g. BYR001">
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label">Contact Person</label>
+        <input class="form-input" id="buyerContact" value="${escHtml(b.ContactPerson||'')}" placeholder="Contact name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Mobile</label>
+        <input class="form-input" id="buyerMobile" value="${escHtml(b.Mobile||'')}" placeholder="10-digit mobile">
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="buyerEmail" type="email" value="${escHtml(b.Email||'')}" placeholder="buyer@example.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Country</label>
+        <input class="form-input" id="buyerCountry" value="${escHtml(b.Country||'India')}" placeholder="Country">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <textarea class="form-textarea" id="buyerAddress" placeholder="Full address">${escHtml(b.Address||'')}</textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status</label>
+      <select class="form-select" id="buyerStatus">
+        <option value="Active" ${b.Status==='Active'?'selected':''}>Active</option>
+        <option value="Inactive" ${b.Status==='Inactive'?'selected':''}>Inactive</option>
+      </select>
+    </div>
+  `;
+}
+
+function saveBuyer(id) {
+  const data = {
+    BuyerName:     document.getElementById('buyerName').value.trim(),
+    BuyerCode:     document.getElementById('buyerCode').value.trim(),
+    ContactPerson: document.getElementById('buyerContact').value.trim(),
+    Mobile:        document.getElementById('buyerMobile').value.trim(),
+    Email:         document.getElementById('buyerEmail').value.trim(),
+    Country:       document.getElementById('buyerCountry').value.trim(),
+    Address:       document.getElementById('buyerAddress').value.trim(),
+    Status:        document.getElementById('buyerStatus').value
+  };
+  if (!data.BuyerName) { showToast('warning', 'Validation', 'Buyer Name is required'); return; }
+
+  const fn = id ? 'serverUpdateBuyer' : 'serverCreateBuyer';
+  const args = id ? [ERP.token, id, data] : [ERP.token, data];
+
+  const btn = document.querySelector('#globalModal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res.success) { showToast('error', 'Error', res.message); if(btn){btn.disabled=false;btn.textContent=id?'Update Buyer':'Save Buyer';} return; }
+      showToast('success', 'Success', id ? 'Buyer updated' : 'Buyer created');
+      _closeModal();
+      loadDropdowns();
+      renderBuyers();
+    })
+    .withFailureHandler(function() { showToast('error', 'Error', 'Failed to save buyer'); if(btn){btn.disabled=false;} })
+    [fn].apply(google.script.run, args);
+}
+
+// ── Sprint S1+ renderers (defined in MastersUI.html, loaded after this file) ──
+// These are placeholder declarations; MastersUI.html overrides them.
+// S2+ stubs remain here until their sprints.
+function renderBOM()            { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>BOM — Sprint S2</p></div>'); }
+function renderSalesOrders()    { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>Sales Orders — Sprint S3</p></div>'); }
+function renderPurchaseOrders() { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>Purchase Orders — Sprint S4</p></div>'); }
+function renderGRN()            { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>GRN — Sprint S4</p></div>'); }
+function renderInventory()      { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>Inventory — Sprint S5</p></div>'); }
+function renderFabricIssue()    { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>Fabric Issue — Sprint S5</p></div>'); }
+function renderLedger()         { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>Stock Ledger — Sprint S5</p></div>'); }
+function renderProductionPlan() { renderProductionPlans(); }
+function renderBundles()        { renderBundleTracking(); }
+function renderProcess(p)       { setPageContent('<div class="page-loader"><div class="loader-spinner"></div><p>' + p + ' — Sprint S7</p></div>'); }
+// renderFabricator, renderDispatch, renderReturns, renderReports
+// are defined in FabricatorUI.html, DispatchUI.html, ReturnUI.html, ReportUI.html
+
+// ── Theme Picker ──────────────────────────────────────────────
+const THEMES = {
+  dark:    { icon: '🌑', label: 'Dark Navy' },
+  light:   { icon: '☀️',  label: 'Light Pro' },
+  aurora:  { icon: '🌌', label: 'Aurora' },
+  crimson: { icon: '🔴', label: 'Crimson' },
+  ocean:   { icon: '🌊', label: 'Ocean' }
+};
+
+function initTheme() {
+  const saved = localStorage.getItem('erp-theme') || 'dark';
+  applyTheme(saved);
+}
+
+function openThemePicker() {
+  document.getElementById('themePickerOverlay').style.display = 'block';
+  document.getElementById('themePickerPanel').style.display  = 'block';
+}
+
+function closeThemePicker() {
+  document.getElementById('themePickerOverlay').style.display = 'none';
+  document.getElementById('themePickerPanel').style.display  = 'none';
+}
+
+function selectTheme(theme) {
+  applyTheme(theme);
+  localStorage.setItem('erp-theme', theme);
+  closeThemePicker();
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  // Update active card highlight
+  document.querySelectorAll('.theme-card').forEach(function(card) {
+    card.classList.toggle('active', card.dataset.theme === theme);
+  });
+  // Update check marks
+  Object.keys(THEMES).forEach(function(t) {
+    var el = document.getElementById('check-' + t);
+    if (el) el.textContent = t === theme ? '✔' : '';
+  });
+  // Update toggle button icon
+  var btn = document.getElementById('themeToggleBtn');
+  if (btn && THEMES[theme]) btn.textContent = THEMES[theme].icon;
+}
+</script>
