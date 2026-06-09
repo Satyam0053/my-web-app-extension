@@ -1,7 +1,5 @@
 <!-- dashboard.html — loaded as default page -->
-<!-- dashboard.html — loaded as default page -->
 <div id="page-dashboard">
-
   <div class="page-header">
     <div>
       <div class="page-title">📊 Dashboard</div>
@@ -13,7 +11,7 @@
     </div>
   </div>
 
-  <!-- KPI STATS -->
+  <!-- KPI STATS — Inventory & PO Row -->
   <div class="stats-grid" id="statsGrid">
     <div class="stat-card blue">
       <div class="stat-icon">🗃️</div>
@@ -45,24 +43,44 @@
       <div class="stat-value" id="statMonthIssue">—</div>
       <div class="stat-label">Monthly Issued (Mtrs)</div>
     </div>
-    <!-- NEW: Total Order Qty -->
-    <div class="stat-card dgreen" >
+    <div class="stat-card dgreen">
       <div class="stat-icon">🛒</div>
       <div class="stat-value" id="statTotalOrderQty">—</div>
       <div class="stat-label">Total Order Qty (Mtrs)</div>
     </div>
-    <!-- NEW: Total Pending Qty -->
-    <div class="stat-card dpink" >
+    <div class="stat-card dpink">
       <div class="stat-icon">⏳</div>
       <div class="stat-value" id="statTotalPendingQty">—</div>
       <div class="stat-label">Total Pending Qty (Mtrs)</div>
     </div>
   </div>
 
+  <!-- SO KPI STATS (NEW) -->
+  <div style="margin-bottom:16px">
+    <div class="page-sub" style="font-weight:600;color:var(--primary);margin-bottom:8px;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase">
+      🛍️ Sales Orders
+    </div>
+    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card blue">
+        <div class="stat-icon">🛍️</div>
+        <div class="stat-value" id="statTotalSOs">—</div>
+        <div class="stat-label">Total Sales Orders</div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-value" id="statPendingSOs">—</div>
+        <div class="stat-label">Pending SOs</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">🚚</div>
+        <div class="stat-value" id="statDispatchedSOs">—</div>
+        <div class="stat-label">Dispatched SOs</div>
+      </div>
+    </div>
+  </div>
+
   <!-- CHARTS ROW -->
   <div class="grid-2 mb-2" style="gap:20px">
-
-    <!-- Daily Trend -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">📅 Daily Issue Trend (7 Days)</span>
@@ -73,8 +91,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Monthly Trend -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">📆 Monthly Consumption (6 Months)</span>
@@ -89,8 +105,6 @@
 
   <!-- BOTTOM ROW -->
   <div class="grid-3 mb-2" style="gap:20px">
-
-    <!-- Top Articles -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">🏷️ Top Consumed Articles</span>
@@ -99,8 +113,6 @@
         <div id="topArticlesList"><div class="table-empty">Loading...</div></div>
       </div>
     </div>
-
-    <!-- Top Vendors -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">🏭 Top Vendors (by Inward)</span>
@@ -109,8 +121,6 @@
         <div id="topVendorsList"><div class="table-empty">Loading...</div></div>
       </div>
     </div>
-
-    <!-- Low Stock Alerts -->
     <div class="card">
       <div class="card-header">
         <span class="card-title" style="color:var(--danger)">⚠️ Low Stock Alerts</span>
@@ -134,18 +144,16 @@
     </div>
   </div>
 
-  <!-- NEW: VENDOR-WISE PENDING QTY -->
+  <!-- VENDOR PENDING QTY -->
   <div class="card">
     <div class="card-header">
       <span class="card-title">⏳ Vendor-wise Pending Qty (Mtrs)</span>
       <button class="btn btn-xs btn-outline" onclick="showPage('purchase-orders')">View POs</button>
     </div>
     <div class="card-body">
-      <!-- Bar Chart -->
       <div class="chart-canvas-wrap" style="height:240px">
         <canvas id="vendorPendingChart"></canvas>
       </div>
-      <!-- Table -->
       <div style="margin-top:16px;overflow-x:auto">
         <table class="table" id="vendorPendingTable" style="font-size:.85rem">
           <thead>
@@ -163,21 +171,27 @@
       </div>
     </div>
   </div>
-
 </div>
 
 <script>
-// Chart.js CDN loaded in scripts.html
 function renderDashboard(data) {
   const s = data.stats;
-  document.getElementById('statTotalItems').textContent     = s.totalItems;
-  document.getElementById('statTotalStock').textContent     = fmtNum(s.totalStock);
-  document.getElementById('statTodayIssue').textContent     = fmtNum(s.todayIssuedQty);
-  document.getElementById('statLowStock').textContent       = s.lowStockCount;
-  document.getElementById('statPendingPOs').textContent     = s.pendingPOs;
-  document.getElementById('statMonthIssue').textContent     = fmtNum(s.monthIssuedQty);
-  document.getElementById('statTotalOrderQty').textContent  = fmtNum(s.totalOrderQty   || 0);
-  document.getElementById('statTotalPendingQty').textContent= fmtNum(s.totalPendingQty || 0);
+
+  // Existing KPIs
+  document.getElementById('statTotalItems').textContent    = s.totalItems;
+  document.getElementById('statTotalStock').textContent    = fmtNum(s.totalStock);
+  document.getElementById('statTodayIssue').textContent    = fmtNum(s.todayIssuedQty);
+  document.getElementById('statLowStock').textContent      = s.lowStockCount;
+  document.getElementById('statPendingPOs').textContent    = s.pendingPOs;
+  document.getElementById('statMonthIssue').textContent    = fmtNum(s.monthIssuedQty);
+  document.getElementById('statTotalOrderQty').textContent = fmtNum(s.totalOrderQty   || 0);
+  document.getElementById('statTotalPendingQty').textContent = fmtNum(s.totalPendingQty || 0);
+
+  // SO KPIs (NEW)
+  document.getElementById('statTotalSOs').textContent      = s.totalSOs      || 0;
+  document.getElementById('statPendingSOs').textContent    = s.pendingSOs    || 0;
+  document.getElementById('statDispatchedSOs').textContent = s.dispatchedSOs || 0;
+
   document.getElementById('dashboardLastUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
 
   // Low stock badge
@@ -186,12 +200,10 @@ function renderDashboard(data) {
     if (badge) { badge.textContent = s.lowStockCount + ' Low Stock'; badge.style.display = 'inline-block'; }
   }
 
-  // Daily trend chart
-  renderBarChart('dailyTrendChart', data.dailyTrend.map(d=>d.date), data.dailyTrend.map(d=>d.qty), '#1a3c5e', 'Qty Issued');
-  // Monthly chart
+  // Charts
+  renderBarChart('dailyTrendChart',   data.dailyTrend.map(d=>d.date),   data.dailyTrend.map(d=>d.qty),   '#1a3c5e', 'Qty Issued');
   renderBarChart('monthlyTrendChart', data.monthlyTrend.map(d=>d.month), data.monthlyTrend.map(d=>d.qty), '#0e9f6e', 'Monthly Issued');
-  // Color chart
-  renderBarChart('colorChart', data.colorData.map(d=>d.color), data.colorData.map(d=>d.qty), '#3182ce', 'Qty', true);
+  renderBarChart('colorChart',        data.colorData.map(d=>d.color),    data.colorData.map(d=>d.qty),    '#3182ce', 'Qty', true);
 
   // Top articles list
   document.getElementById('topArticlesList').innerHTML = data.topArticles.length ?
@@ -227,15 +239,13 @@ function renderDashboard(data) {
         <span class="badge badge-danger">${fmtNum(i.Current_Stock)}</span>
       </div>`).join('') : '<div class="table-empty" style="color:var(--success);font-style:normal">✅ All stock levels OK</div>';
 
-  // ── Vendor Pending Qty Chart + Table ────────────────────────
+  // Vendor Pending Qty Chart + Table
   const vpData = data.vendorPendingQty || [];
   if (vpData.length) {
     const vpLabels = vpData.map(v => v.vendor);
     const vpValues = vpData.map(v => v.qty);
     const totalPending = vpValues.reduce((a, b) => a + b, 0);
-
     renderBarChart('vendorPendingChart', vpLabels, vpValues, '#e11d48', 'Pending Qty (Mtrs)');
-
     document.getElementById('vendorPendingTableBody').innerHTML = vpData.map((v, i) => `
       <tr>
         <td>${i + 1}</td>
@@ -246,13 +256,14 @@ function renderDashboard(data) {
         </td>
       </tr>`).join('');
   } else {
-    if (chartInstances['vendorPendingChart']) { chartInstances['vendorPendingChart'].destroy(); }
+    if (chartInstances['vendorPendingChart']) chartInstances['vendorPendingChart'].destroy();
     document.getElementById('vendorPendingTableBody').innerHTML =
       '<tr><td colspan="4" class="table-empty" style="color:var(--success);font-style:normal">✅ No pending quantities</td></tr>';
   }
 }
 
 let chartInstances = {};
+
 function renderBarChart(canvasId, labels, values, color, label, horizontal) {
   if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
   const ctx = document.getElementById(canvasId);
@@ -269,7 +280,7 @@ function renderBarChart(canvasId, labels, values, color, label, horizontal) {
       plugins: { legend: { display: false } },
       scales: {
         x: { grid: { display: !horizontal }, ticks: { font: { size: 10 } } },
-        y: { grid: { display: horizontal }, ticks: { font: { size: 10 } }, beginAtZero: true }
+        y: { grid: { display:  horizontal }, ticks: { font: { size: 10 } }, beginAtZero: true }
       }
     }
   });
