@@ -33,6 +33,8 @@ function initApp() {
     });
   setupNavigation();
   loadDashboard();
+  addThemeButtonToTopbar();
+  loadSavedTheme();
 }
 
 // ── NAVIGATION ───────────────────────────────────────────────
@@ -60,12 +62,16 @@ async function showPage(page) {
       case 'stock-issue'      : await loadStockIssue();        break;
       case 'stock-returns'    : await loadStockReturns();      break;
       case 'vendors'          : await loadVendors();           break;
+      case 'customers'        : await loadCustomers();         break;
+      case 'articles'         : await loadArticles();          break;
+      case 'sales-orders'     : await loadSalesOrders();       break;
       case 'production-orders': await loadProductionOrders();  break;
       case 'reports'          : await loadReports();           break;
       case 'stock-ledger'     : await loadStockLedger();       break;
       case 'activity-logs'    : await loadActivityLogs();      break;
       case 'change-password'  :       loadChangePassword();    break;
       case 'user-management'  : await loadUserManagement();    break;
+
       default: break;
     }
   } catch(e) {
@@ -130,32 +136,185 @@ async function loadDashboard() {
 function getDashboardTemplate() {
   return `<div id="page-dashboard">
     <div class="page-header">
-      <div><div class="page-title">📊 Dashboard</div><div class="page-sub" id="dashboardLastUpdated">Loading...</div></div>
+      <div>
+        <div class="page-title">📊 Dashboard</div>
+        <div class="page-sub" id="dashboardLastUpdated">Loading...</div>
+      </div>
       <div class="page-actions">
         <button class="btn btn-outline btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
         <button class="btn btn-primary btn-sm" onclick="showPage('purchase-orders')">+ New PO</button>
       </div>
     </div>
+ 
+    <!-- Inventory & PO KPIs -->
     <div class="stats-grid">
-      <div class="stat-card blue"><div class="stat-icon">🗃️</div><div class="stat-value" id="statTotalItems">—</div><div class="stat-label">Inventory Items</div></div>
-      <div class="stat-card green"><div class="stat-icon">📦</div><div class="stat-value" id="statTotalStock">—</div><div class="stat-label">Total Stock (Mtrs)</div></div>
-      <div class="stat-card orange"><div class="stat-icon">⬆️</div><div class="stat-value" id="statTodayIssue">—</div><div class="stat-label">Today's Issues</div></div>
-      <div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-value" id="statLowStock">—</div><div class="stat-label">Low Stock Alerts</div></div>
-      <div class="stat-card blue"><div class="stat-icon">📋</div><div class="stat-value" id="statPendingPOs">—</div><div class="stat-label">Pending POs</div></div>
-      <div class="stat-card teal"><div class="stat-icon">📈</div><div class="stat-value" id="statMonthIssue">—</div><div class="stat-label">Monthly Issued (Mtrs)</div></div>
+      <div class="stat-card blue">
+        <div class="stat-icon">🗃️</div>
+        <div class="stat-value" id="statTotalItems">—</div>
+        <div class="stat-label">Inventory Items</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">📦</div>
+        <div class="stat-value" id="statTotalStock">—</div>
+        <div class="stat-label">Total Stock (Mtrs)</div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-icon">⬆️</div>
+        <div class="stat-value" id="statTodayIssue">—</div>
+        <div class="stat-label">Today's Issues</div>
+      </div>
+      <div class="stat-card red">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-value" id="statLowStock">—</div>
+        <div class="stat-label">Low Stock Alerts</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value" id="statPendingPOs">—</div>
+        <div class="stat-label">Pending POs</div>
+      </div>
+      <div class="stat-card teal">
+        <div class="stat-icon">📈</div>
+        <div class="stat-value" id="statMonthIssue">—</div>
+        <div class="stat-label">Monthly Issued (Mtrs)</div>
+      </div>
+      <div class="stat-card dgreen">
+        <div class="stat-icon">🛒</div>
+        <div class="stat-value" id="statTotalOrderQty">—</div>
+        <div class="stat-label">Total Order Qty (Mtrs)</div>
+      </div>
+      <div class="stat-card dpink">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-value" id="statTotalPendingQty">—</div>
+        <div class="stat-label">Total Pending Qty (Mtrs)</div>
+      </div>
     </div>
+ 
+    <!-- SO KPIs -->
+    <div style="margin-bottom:16px">
+      <div class="page-sub" style="font-weight:600;color:var(--primary);
+        margin-bottom:8px;font-size:.8rem;letter-spacing:.06em;
+        text-transform:uppercase">
+        🛍️ Sales Orders
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card blue">
+          <div class="stat-icon">🛍️</div>
+          <div class="stat-value" id="statTotalSOs">—</div>
+          <div class="stat-label">Total Sales Orders</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-value" id="statPendingSOs">—</div>
+          <div class="stat-label">Pending SOs</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-icon">🚚</div>
+          <div class="stat-value" id="statDispatchedSOs">—</div>
+          <div class="stat-label">Dispatched SOs</div>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- Charts -->
     <div class="grid-2 mb-2" style="gap:20px">
-      <div class="card"><div class="card-header"><span class="card-title">📅 Daily Issue Trend (7 Days)</span></div><div class="card-body"><div class="chart-canvas-wrap"><canvas id="dailyTrendChart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><span class="card-title">📆 Monthly Consumption (6 Months)</span></div><div class="card-body"><div class="chart-canvas-wrap"><canvas id="monthlyTrendChart"></canvas></div></div></div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📅 Daily Issue Trend (7 Days)</span>
+        </div>
+        <div class="card-body">
+          <div class="chart-canvas-wrap">
+            <canvas id="dailyTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📆 Monthly Consumption (6 Months)</span>
+        </div>
+        <div class="card-body">
+          <div class="chart-canvas-wrap">
+            <canvas id="monthlyTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
+ 
+    <!-- Bottom row -->
     <div class="grid-3 mb-2" style="gap:20px">
-      <div class="card"><div class="card-header"><span class="card-title">🏷️ Top Consumed Articles</span></div><div class="card-body" style="padding:12px" id="topArticlesList"><div class="table-empty">Loading...</div></div></div>
-      <div class="card"><div class="card-header"><span class="card-title">🏭 Top Vendors</span></div><div class="card-body" style="padding:12px" id="topVendorsList"><div class="table-empty">Loading...</div></div></div>
-      <div class="card"><div class="card-header"><span class="card-title" style="color:var(--danger-light)">⚠️ Low Stock Alerts</span><button class="btn btn-xs btn-outline" onclick="showPage('inventory')">View All</button></div><div class="card-body" style="padding:12px" id="lowStockList"><div class="table-empty">Loading...</div></div></div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🏷️ Top Consumed Articles</span>
+        </div>
+        <div class="card-body" style="padding:12px">
+          <div id="topArticlesList"><div class="table-empty">Loading...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🏭 Top Vendors</span>
+        </div>
+        <div class="card-body" style="padding:12px">
+          <div id="topVendorsList"><div class="table-empty">Loading...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--danger-light)">
+            ⚠️ Low Stock Alerts
+          </span>
+          <button class="btn btn-xs btn-outline"
+            onclick="showPage('inventory')">View All</button>
+        </div>
+        <div class="card-body" style="padding:12px">
+          <div id="lowStockList"><div class="table-empty">Loading...</div></div>
+        </div>
+      </div>
     </div>
-    <div class="card"><div class="card-header"><span class="card-title">🎨 Color-wise Consumption</span></div><div class="card-body"><div class="chart-canvas-wrap" style="height:180px"><canvas id="colorChart"></canvas></div></div></div>
+ 
+    <!-- Color chart -->
+    <div class="card mb-2">
+      <div class="card-header">
+        <span class="card-title">🎨 Color-wise Consumption</span>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap" style="height:180px">
+          <canvas id="colorChart"></canvas>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- Vendor pending qty -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">⏳ Vendor-wise Pending Qty (Mtrs)</span>
+        <button class="btn btn-xs btn-outline"
+          onclick="showPage('purchase-orders')">View POs</button>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap" style="height:240px">
+          <canvas id="vendorPendingChart"></canvas>
+        </div>
+        <div style="margin-top:16px;overflow-x:auto">
+          <table class="table" style="font-size:.85rem">
+            <thead>
+              <tr>
+                <th>S.No.</th>
+                <th>Vendor Name</th>
+                <th style="text-align:right">Pending Qty (Mtrs)</th>
+                <th style="text-align:right">% of Total</th>
+              </tr>
+            </thead>
+            <tbody id="vendorPendingTableBody">
+              <tr><td colspan="4" class="table-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
+ 
 
 // ── PURCHASE ORDERS ───────────────────────────────────────────
 async function loadPurchaseOrders() {
@@ -406,23 +565,200 @@ function updatePOBalance(poNumber) {
   }
 }
 
+
+// ============================================================
+// PATCH FOR scripts.html
+// Replace the existing submitReceiveFabric() function
+// with this new version that handles:
+//   1. Over-receive → shows info toast with excess qty
+//   2. Under-receive → shows modal asking what to do
+//   3. Exact receive → success toast as before
+// Also add the new showUnderReceiveModal() and closePOFromModal() functions
+// ============================================================
+
+// ============================================================
+// PATCH v2 FOR scripts.html — Replace submitReceiveFabric()
+// and add all helper functions after it.
+//
+// NEW FLOW:
+//   1. User fills form and clicks Save
+//   2. BEFORE any API call, check qty vs balance
+//   3. If over  → confirmation dialog → user confirms → save
+//   4. If under → choice modal (Mark Complete / Receive Later)
+//                 → user picks → save with that intent
+//   5. If exact → save directly
+// ============================================================
+
 async function submitReceiveFabric() {
-  const po=document.getElementById('rec_po').value;
-  if(!po){toast('Select a Purchase Order','warning');return;}
-  showLoading('Creating GRN...');
-  try{
-    const res=await callAPI('receivefabric',{
-      poNumber:po,receivedQty:document.getElementById('rec_qty').value,
-      batchNumber:document.getElementById('rec_batch').value,dyeLot:document.getElementById('rec_dyeLot').value,
-      qualityStatus:document.getElementById('rec_quality').value,storageLocation:document.getElementById('rec_location').value,
-      notes:document.getElementById('rec_notes').value
-    });
-    if(res.success){toast('GRN '+res.data.grnNumber+' created! Stock: '+res.data.previousStock+' → '+res.data.updatedStock,'success');closeModal();await loadFabricReceiving();}
-    else toast('Error: '+res.error,'error');
-  }catch(e){toast('Error: '+e.message,'error');}
-  finally{hideLoading();}
+  const poNumber = document.getElementById('rec_po').value;
+  if (!poNumber) { toast('Select a Purchase Order', 'warning'); return; }
+
+  const recQty = parseFloat(document.getElementById('rec_qty').value);
+  if (!recQty || recQty <= 0) { toast('Enter a valid received quantity', 'warning'); return; }
+
+  // --- CAPTURE EXTRA FIELDS SAFELY NOW BEFORE MODALS OPEN ---
+  const extraFields = {
+    receivedQty:     document.getElementById('rec_qty')?.value || "0",
+    batchNumber:    document.getElementById('rec_batch')?.value || "",
+    dyeLot:         document.getElementById('rec_dyeLot')?.value || "",
+    qualityStatus:  document.getElementById('rec_quality')?.value || "",
+    storageLocation:document.getElementById('rec_location')?.value || "",
+    notes:          document.getElementById('rec_notes')?.value || ""
+  };
+
+  // Find the selected PO to get its balance
+  const po = (state.pendingPOs || []).find(p => p.PO_Number === poNumber);
+  const balance = po ? parseFloat(po.Balance_Qty) || 0 : 0;
+
+  // ── SCENARIO A: Over Receive ──────────────────────────────
+  if (recQty > balance + 0.001) {
+    const excess = Math.round((recQty - balance) * 1000) / 1000;
+    openModal(
+      '⚠️ Over Receiving — Confirm',
+      `
+      <div class="warn-box mb-2" style="font-size:15px;line-height:1.7">
+        You are receiving <strong>${fmtNum(recQty)} ${po ? po.Unit : 'units'}</strong>
+        but the PO balance is only <strong>${fmtNum(balance)} ${po ? po.Unit : 'units'}</strong>.<br/>
+        This will record an excess of <strong>${fmtNum(excess)} units</strong>
+        and mark the PO as <strong>Over Received</strong>.
+      </div>
+      <p style="color:var(--text-muted);font-size:14px;margin:0">
+        Do you want to continue?
+      </p>
+      `,
+      [
+        { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+        {
+          label: '✓ Yes, Save GRN',
+          cls: 'btn-warning',
+          action: () => { closeModal(); _doSaveGRN(poNumber, 'over', null, extraFields); }
+        }
+      ]
+    );
+    return;
+  }
+
+  // ── SCENARIO B: Under Receive ─────────────────────────────
+  if (recQty < balance - 0.001) {
+    const remaining = Math.round((balance - recQty) * 1000) / 1000;
+    
+    // Stringify fields to safely pass them into the HTML string onclick event
+    const safeFieldsStr = encodeURIComponent(JSON.stringify(extraFields));
+
+    openModal(
+      '⚠️ Partial Receipt — What would you like to do?',
+      `
+      <div class="info-box mb-3" style="font-size:15px;line-height:1.7">
+        You are receiving <strong>${fmtNum(recQty)} ${po ? po.Unit : 'units'}</strong>
+        against a balance of <strong>${fmtNum(balance)} ${po ? po.Unit : 'units'}</strong>.<br/>
+        <strong>${fmtNum(remaining)} units</strong> will remain pending.
+      </div>
+      <p style="font-weight:600;margin:0 0 12px">Choose what to do with the remaining balance:</p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+
+        <div class="card" style="border:2px solid var(--success);cursor:pointer;padding:0"
+             onclick="closeModal();_doSaveGRN('${poNumber}','under','complete', JSON.parse(decodeURIComponent('${safeFieldsStr}')))">
+          <div class="card-body" style="padding:16px 20px">
+            <div class="fw-bold" style="color:var(--success);font-size:15px">
+              ✅ Save GRN &amp; Mark PO Complete
+            </div>
+            <div class="fs-sm text-muted mt-1">
+              GRN will be saved. The remaining ${fmtNum(remaining)} units will be
+              written off. No further receipts allowed against this PO.
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="border:2px solid var(--primary);cursor:pointer;padding:0"
+             onclick="closeModal();_doSaveGRN('${poNumber}','under','partial', JSON.parse(decodeURIComponent('${safeFieldsStr}')))">
+          <div class="card-body" style="padding:16px 20px">
+            <div class="fw-bold" style="color:var(--primary);font-size:15px">
+              🕐 Save GRN &amp; Receive Balance Later
+            </div>
+            <div class="fs-sm text-muted mt-1">
+              GRN will be saved. PO stays open as <strong>Partial</strong>.
+              You can create another GRN when the remaining
+              ${fmtNum(remaining)} units arrive.
+            </div>
+          </div>
+        </div>
+
+      </div>
+      `,
+      [] // No footer buttons — user clicks one of the cards above
+    );
+    return;
+  }
+
+  // ── SCENARIO C: Exact Receive ─────────────────────────────
+  // qty == balance exactly, save directly
+  await _doSaveGRN(poNumber, 'exact', null, extraFields);
 }
 
+// ── INTERNAL: Actually call the API and save the GRN ─────────
+// intent: 'over' | 'under' | 'exact'
+// closeChoice: 'complete' | 'partial' | null
+async function _doSaveGRN(poNumber, intent, closeChoice, fields) {
+  showLoading('Saving GRN...');
+  try {
+    const res = await callAPI('receivefabric', {
+      poNumber       : poNumber,
+      receivedQty    : fields.receivedQty,
+      batchNumber    : fields.batchNumber,
+      dyeLot         : fields.dyeLot,
+      qualityStatus  : fields.qualityStatus,
+      storageLocation: fields.storageLocation,
+      notes          : fields.notes
+    });
+
+    if (!res.success) {
+      toast('Error: ' + res.error, 'error');
+      return;
+    }
+
+    const d = res.data;
+
+    // If user chose to close the PO, call closePO now
+    if (closeChoice === 'complete') {
+      const closeRes = await callAPI('closePO', { poNumber });
+      if (closeRes.success) {
+        toast(
+          `GRN ${d.grnNumber} saved. PO ${poNumber} marked as Completed. ✓`,
+          'success', 5000
+        );
+      } else {
+        // GRN saved but PO close failed — warn but don't block
+        toast(
+          `GRN ${d.grnNumber} saved. Could not close PO: ${closeRes.error}`,
+          'warning', 5000
+        );
+      }
+    } else if (intent === 'over') {
+      toast(
+        `GRN ${d.grnNumber} saved. ⚠️ Over-received by ${fmtNum(d.excessQty)} units. PO: Over Received.`,
+        'warning', 5000
+      );
+    } else if (closeChoice === 'partial') {
+      toast(
+        `GRN ${d.grnNumber} saved. PO kept open as Partial. Receive balance later. ✓`,
+        'success', 4000
+      );
+    } else {
+      // Exact receive
+      toast(
+        `GRN ${d.grnNumber} saved! Stock: ${d.previousStock} → ${d.updatedStock}. PO Completed ✓`,
+        'success', 4000
+      );
+    }
+
+    await loadFabricReceiving();
+
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    hideLoading();
+  }
+}
 // ── INVENTORY ─────────────────────────────────────────────────
 async function loadInventory() {
   const [invRes,vendorsRes]=await Promise.all([callAPI('getInventory',{}),callAPI('getVendors')]);
@@ -1499,4 +1835,1329 @@ function exportTableToCSV(tableId,filename){
   a.click();
   toast('CSV exported!','success');
 }
+
+
+
+// ── THEME SWITCHER ────────────────────────────────────────────
+
+
+const THEME_LIST = [
+  { key: 'theme-dark-maroon',   label: '🌑 Dark Maroon',   desc: 'Original dark theme',          preview: ['#450052','#FFDB08','#78004E'] },
+  { key: 'theme-ocean-blue',    label: '🌊 Ocean Blue',     desc: 'Clean light blue professional', preview: ['#0c4a6e','#0369a1','#f0f9ff'] },
+  { key: 'theme-forest-green',  label: '🌿 Forest Green',   desc: 'Calm and natural',              preview: ['#052e16','#15803d','#f0fdf4'] },
+  { key: 'theme-rose-gold',     label: '🌸 Rose Gold',      desc: 'Elegant pink and gold',         preview: ['#4c0519','#be123c','#fff1f2'] },
+  { key: 'theme-royal-purple',  label: '👑 Royal Purple',   desc: 'Bold and sophisticated',        preview: ['#1e0533','#6d28d9','#faf5ff'] },
+  { key: 'theme-sunset-orange', label: '🌅 Sunset Orange',  desc: 'Warm and energetic',            preview: ['#431407','#c2410c','#fff7ed'] },
+  { key: 'theme-clean-white',   label: '🤍 Clean White',    desc: 'Minimal white with color accents', preview: ['#1e293b','#4f46e5','#ffffff'] },
+  { key: 'theme-vivid-white', label: '✨ Vivid White', desc: 'All white with colorful text', preview: ['#1d4ed8','#7c3aed','#15803d'] },
+];
+function applyTheme(themeKey) {
+  THEME_LIST.forEach(t => document.body.classList.remove(t.key));
+  if (themeKey !== 'theme-dark-maroon') {
+    document.body.classList.add(themeKey);
+  }
+  try { localStorage.setItem('erp_theme', themeKey); } catch(e) {}
+  document.querySelectorAll('.theme-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.theme === themeKey);
+  });
+  closeThemePicker();
+}
+
+function loadSavedTheme() {
+  try {
+    const saved = localStorage.getItem('erp_theme') || 'theme-dark-maroon';
+    applyTheme(saved);
+  } catch(e) {}
+}
+
+function openThemePicker() {
+  const existing = document.getElementById('themePickerPanel');
+  if (existing) { existing.remove(); return; }
+
+  const currentTheme = (() => {
+    try { return localStorage.getItem('erp_theme') || 'theme-dark-maroon'; } catch(e) { return 'theme-dark-maroon'; }
+  })();
+
+  const panel = document.createElement('div');
+  panel.id = 'themePickerPanel';
+  panel.style.cssText = `
+    position:fixed; top:66px; right:16px; z-index:9999;
+    background:#1a1a2e; border:1px solid rgba(255,255,255,0.12);
+    border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,0.5);
+    padding:16px; width:300px;
+  `;
+  panel.innerHTML = `
+    <div style="font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">🎨 Choose Theme</div>
+    <div id="themeOptionsList"></div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;text-align:center;">Theme is saved automatically</div>
+  `;
+  document.body.appendChild(panel);
+
+  const list = document.getElementById('themeOptionsList');
+  THEME_LIST.forEach(t => {
+    const opt = document.createElement('div');
+    opt.className = 'theme-option' + (t.key === currentTheme ? ' active' : '');
+    opt.dataset.theme = t.key;
+    opt.onclick = () => applyTheme(t.key);
+    opt.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;cursor:pointer;border:2px solid ' + (t.key === currentTheme ? 'rgba(255,255,255,0.2)' : 'transparent') + ';margin-bottom:4px;';
+    opt.onmouseover = () => { opt.style.background = 'rgba(255,255,255,0.06)'; };
+    opt.onmouseout  = () => { opt.style.background = t.key === currentTheme ? 'rgba(255,255,255,0.08)' : ''; };
+    opt.innerHTML = `
+      <div style="display:flex;gap:3px;flex-shrink:0">
+        ${t.preview.map(c => `<div style="width:14px;height:14px;border-radius:50%;background:${c};border:1px solid rgba(255,255,255,0.15)"></div>`).join('')}
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:#f1f5f9">${t.label}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:1px">${t.desc}</div>
+      </div>
+      ${t.key === currentTheme ? '<div style="margin-left:auto;color:#10b981;font-weight:700">✓</div>' : ''}
+    `;
+    list.appendChild(opt);
+  });
+
+  setTimeout(() => {
+    document.addEventListener('click', function outside(e) {
+      if (!panel.contains(e.target) && e.target.id !== 'themeToggleBtn') {
+        panel.remove();
+        document.removeEventListener('click', outside);
+      }
+    });
+  }, 100);
+}
+
+function closeThemePicker() {
+  const p = document.getElementById('themePickerPanel');
+  if (p) p.remove();
+}
+
+function addThemeButtonToTopbar() {
+  const topbarRight = document.querySelector('.topbar-right');
+  if (!topbarRight || document.getElementById('themeToggleBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'themeToggleBtn';
+  btn.title = 'Change Theme';
+  btn.innerHTML = '🎨';
+  btn.style.cssText = 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#f1f5f9;padding:6px 10px;font-size:16px;cursor:pointer;flex-shrink:0;';
+  btn.onclick = (e) => { e.stopPropagation(); openThemePicker(); };
+  topbarRight.insertBefore(btn, topbarRight.firstChild);
+}
+
+
+
+// ============================================================
+// CUSTOMER MASTER
+// ============================================================
+
+async function loadCustomers() {
+  const res = await callAPI('getCustomers', {});
+  const customers = res.data || [];
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">👤 Customer Master</div>
+      <div class="page-sub">${customers.length} customers registered</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="showAddCustomerModal()">+ Add Customer</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('custTable','Customers')">⬇ Export</button>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="card-body" style="padding:12px">
+      <input type="text" id="custSearch" class="form-control" placeholder="🔍 Search by name, mobile, location…" oninput="filterCustomers()" style="max-width:360px">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table class="table" id="custTable">
+        <thead>
+          <tr>
+            <th>Customer ID</th><th>Customer Name</th><th>Mobile</th>
+            <th>Email</th><th>Location</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="custTableBody">
+          ${customers.length === 0
+            ? '<tr><td colspan="7" class="table-empty">No customers found. Add your first customer.</td></tr>'
+            : customers.map(c => custRow(c)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function _custRow(c) {
+  return `<tr data-name="${String(c.Customer_Name || '').toLowerCase()}" data-mobile="${String(c.Mobile || '').toLowerCase()}" data-loc="${String(c.Location || '').toLowerCase()}">
+    <td class="mono fs-sm">${c.Customer_ID}</td>
+    <td class="fw-600">${c.Customer_Name}</td>
+    <td class="fs-sm">${c.Mobile || '—'}</td>
+    <td class="fs-sm">${c.Email  || '—'}</td>
+    <td class="fs-sm">${c.Location || '—'}</td>
+    <td class="fs-sm">${fmtDate(c.Created_At)}</td>
+    <td>
+      <button class="btn btn-xs btn-outline" onclick='showEditCustomerModal(${JSON.stringify(c)})'>✏️ Edit</button>
+      <button class="btn btn-xs btn-danger" onclick="deleteCustomer('${c.Customer_ID}','${c.Customer_Name.replace(/'/g, "\\'")}')">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+function filterCustomers() {
+  const q = document.getElementById('custSearch').value.toLowerCase();
+  document.querySelectorAll('#custTableBody tr[data-name]').forEach(tr => {
+    const match = tr.dataset.name.includes(q) || tr.dataset.mobile.includes(q) || tr.dataset.loc.includes(q);
+    tr.style.display = match ? '' : 'none';
+  });
+}
+
+function showAddCustomerModal() {
+  openModal('Add Customer', `
+    <div class="form-group">
+      <label class="form-label">Customer Name <span class="text-danger">*</span></label>
+      <input type="text" id="custName" class="form-control" placeholder="e.g. Ramesh Traders">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mobile Number</label>
+      <input type="text" id="custMobile" class="form-control" placeholder="Optional">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="custEmail" class="form-control" placeholder="Optional">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="custLocation" class="form-control" placeholder="City / State">
+    </div>
+  `, [
+    { label: 'Cancel', class: 'btn-outline', action: () => closeModal() },
+    { label: 'Save Customer', class: 'btn-primary', action: async () => {
+      const res = await callAPI('createCustomer', {
+        customerName: document.getElementById('custName').value,
+        mobile      : document.getElementById('custMobile').value,
+        email       : document.getElementById('custEmail').value,
+        location    : document.getElementById('custLocation').value
+      });
+      if (res.success) { toast(res.message || 'Customer created', 'success'); closeModal(); loadCustomers(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+function showEditCustomerModal(c) {
+  openModal('Edit Customer', `
+    <div class="form-group">
+      <label class="form-label">Customer ID</label>
+      <input type="text" class="form-control" value="${c.Customer_ID}" readonly>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Customer Name <span class="text-danger">*</span></label>
+      <input type="text" id="editCustName" class="form-control" value="${c.Customer_Name}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mobile Number</label>
+      <input type="text" id="editCustMobile" class="form-control" value="${c.Mobile || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="editCustEmail" class="form-control" value="${c.Email || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="editCustLocation" class="form-control" value="${c.Location || ''}">
+    </div>
+  `, [
+    { label: 'Cancel', class: 'btn-outline', action: () => closeModal() },
+    { label: 'Update', class: 'btn-primary', action: async () => {
+      const res = await callAPI('updateCustomer', {
+        customerId  : c.Customer_ID,
+        customerName: document.getElementById('editCustName').value,
+        mobile      : document.getElementById('editCustMobile').value,
+        email       : document.getElementById('editCustEmail').value,
+        location    : document.getElementById('editCustLocation').value
+      });
+      if (res.success) { toast('Customer updated', 'success'); closeModal(); loadCustomers(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+async function deleteCustomer(id, name) {
+  if (!confirm(`Delete customer "${name}"?\n\nThis cannot be undone.`)) return;
+  const res = await callAPI('deleteCustomer', { customerId: id });
+  if (res.success) { toast('Customer deleted', 'success'); loadCustomers(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+// ============================================================
+// ARTICLE MASTER
+// ============================================================
+
+async function loadArticles() {
+  const res = await callAPI('getArticles', {});
+  const articles = res.data || [];
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">🏷️ Article Master</div>
+      <div class="page-sub">${articles.length} articles</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="showAddArticleModal()">+ Add Article</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('artMasterTable','Articles')">⬇ Export</button>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="card-body" style="padding:12px">
+      <input type="text" id="artSearch" class="form-control" placeholder="🔍 Search by article number or job card…" oninput="filterArticles()" style="max-width:360px">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table class="table" id="artMasterTable">
+        <thead>
+          <tr>
+            <th>Article ID</th><th>Article Number</th><th>Job Card No.</th>
+            <th>Colors & Qty</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="artTableBody">
+          ${articles.length === 0
+            ? '<tr><td colspan="6" class="table-empty">No articles found.</td></tr>'
+            : articles.map(a => artRow(a)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function artRow(a) {
+  const colors = Array.isArray(a.Colors) ? a.Colors : [];
+  const colorChips = colors.map(c =>
+    `<span class="badge badge-info" style="margin:2px">${c.color} (${c.qty})</span>`
+  ).join('');
+  return `<tr data-art="${(a.Article_Number||'').toLowerCase()}" data-job="${(a.Job_Card_Number||'').toLowerCase()}">
+    <td class="mono fs-sm">${a.Article_ID}</td>
+    <td class="fw-600">${a.Article_Number}</td>
+    <td class="fs-sm">${a.Job_Card_Number || '—'}</td>
+    <td style="max-width:240px">${colorChips || '—'}</td>
+    <td class="fs-sm">${fmtDate(a.Created_At)}</td>
+    <td>
+      <button class="btn btn-xs btn-outline" onclick='showEditArticleModal(${JSON.stringify(a)})'>✏️ Edit</button>
+      <button class="btn btn-xs btn-danger"  onclick="deleteArticle('${a.Article_ID}','${a.Article_Number.replace(/'/g,"\\'")}')">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+function filterArticles() {
+  const q = document.getElementById('artSearch').value.toLowerCase();
+  document.querySelectorAll('#artTableBody tr[data-art]').forEach(tr => {
+    tr.style.display = (tr.dataset.art.includes(q) || tr.dataset.job.includes(q)) ? '' : 'none';
+  });
+}
+
+function buildColorRows(colors) {
+  return (colors || []).map((c, i) => colorRowHtml(i, c.color, c.qty)).join('');
+}
+
+function colorRowHtml(i, colorVal, qtyVal) {
+  return `<div class="color-row" id="colorRow${i}" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <input type="text"   class="form-control" placeholder="Color name" value="${colorVal || ''}"
+           style="flex:1" oninput="syncColorRows()">
+    <input type="number" class="form-control" placeholder="Qty" value="${qtyVal !== undefined ? qtyVal : ''}"
+           style="width:100px" min="0" oninput="syncColorRows()">
+    <button type="button" class="btn btn-xs btn-danger" onclick="removeColorRow(this)" title="Remove">✕</button>
+  </div>`;
+}
+
+let _colorRowCount = 0;
+function addColorRow() {
+  _colorRowCount++;
+  const wrap = document.getElementById('colorRowsWrap');
+  const div  = document.createElement('div');
+  div.innerHTML = colorRowHtml(_colorRowCount, '', '');
+  wrap.appendChild(div.firstElementChild);
+}
+
+function removeColorRow(btn) {
+  const row = btn.closest('.color-row');
+  if (document.querySelectorAll('#colorRowsWrap .color-row').length <= 1) {
+    toast('At least one color is required', 'error'); return;
+  }
+  row.remove();
+}
+
+function syncColorRows() { /* no-op — values read live on submit */ }
+
+function readColorRows() {
+  const rows = document.querySelectorAll('#colorRowsWrap .color-row');
+  const colors = [];
+  rows.forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    colors.push({ color: inputs[0].value.trim(), qty: inputs[1].value });
+  });
+  return colors;
+}
+
+function showAddArticleModal() {
+  _colorRowCount = 0;
+  showModal('Add Article', `
+    <div class="form-group">
+      <label class="form-label">Job Card Number <span class="text-muted">(optional)</span></label>
+      <input type="text" id="artJobCard" class="form-control" placeholder="e.g. JC-2024-001">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Article Number <span class="text-danger">*</span></label>
+      <input type="text" id="artNumber" class="form-control" placeholder="e.g. ART-101">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Colors <span class="text-danger">*</span></label>
+      <div id="colorRowsWrap">${colorRowHtml(0, '', '')}</div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addColorRow()" style="margin-top:6px">+ Add Color</button>
+    </div>
+  `, [
+    { label: 'Cancel', class: 'btn-outline', action: () => closeModal() },
+    { label: 'Save Article', class: 'btn-primary', action: async () => {
+      const res = await callAPI('createArticle', {
+        jobCardNumber: document.getElementById('artJobCard').value,
+        articleNumber: document.getElementById('artNumber').value,
+        colors       : readColorRows()
+      });
+      if (res.success) { toast(res.message || 'Article created', 'success'); closeModal(); loadArticles(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+function showEditArticleModal(a) {
+  _colorRowCount = (a.Colors || []).length;
+  showModal('Edit Article', `
+    <div class="form-group">
+      <label class="form-label">Article ID</label>
+      <input type="text" class="form-control" value="${a.Article_ID}" readonly>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Job Card Number</label>
+      <input type="text" id="editArtJobCard" class="form-control" value="${a.Job_Card_Number || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Article Number <span class="text-danger">*</span></label>
+      <input type="text" id="editArtNumber" class="form-control" value="${a.Article_Number}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Colors <span class="text-danger">*</span></label>
+      <div id="colorRowsWrap">${buildColorRows(a.Colors)}</div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addColorRow()" style="margin-top:6px">+ Add Color</button>
+    </div>
+  `, [
+    { label: 'Cancel', class: 'btn-outline', action: () => closeModal() },
+    { label: 'Update', class: 'btn-primary', action: async () => {
+      const res = await callAPI('updateArticle', {
+        articleId    : a.Article_ID,
+        jobCardNumber: document.getElementById('editArtJobCard').value,
+        articleNumber: document.getElementById('editArtNumber').value,
+        colors       : readColorRows()
+      });
+      if (res.success) { toast('Article updated', 'success'); closeModal(); loadArticles(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+async function deleteArticle(id, number) {
+  if (!confirm(`Delete article "${number}"?\n\nThis cannot be undone.`)) return;
+  const res = await callAPI('deleteArticle', { articleId: id });
+  if (res.success) { toast('Article deleted', 'success'); loadArticles(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+
+
+
+// ============================================================
+// CUSTOMER MASTER
+// ============================================================
+
+async function loadCustomers() {
+  showLoading('Loading customers...');
+  const res = await callAPI('getCustomers', {});
+  hideLoading();
+  const customers = res.data || [];
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">👤 Customer Master</div>
+      <div class="page-sub">${customers.length} customers registered</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="showAddCustomerModal()">+ Add Customer</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('custTable','Customers')">⬇ Export</button>
+    </div>
+  </div>
+  <div class="card mb-2">
+    <div class="card-body" style="padding:12px">
+      <input type="text" id="custSearch" class="form-control"
+        placeholder="🔍 Search by name, mobile, location…"
+        oninput="filterCustomers()" style="max-width:360px">
+    </div>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table class="table" id="custTable">
+        <thead>
+          <tr>
+            <th>Customer ID</th><th>Customer Name</th><th>Mobile</th>
+            <th>Email</th><th>Location</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="custTableBody">
+          ${customers.length === 0
+            ? '<tr><td colspan="7" class="table-empty">No customers found. Add your first customer.</td></tr>'
+            : customers.map(c => _custRow(c)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function showAddCustomerModal() {
+  openModal('Add Customer', `
+    <div class="form-group">
+      <label class="form-label required">Customer Name</label>
+      <input type="text" id="custName" class="form-control" placeholder="e.g. Ramesh Traders">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mobile Number</label>
+      <input type="text" id="custMobile" class="form-control" placeholder="Optional">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="custEmail" class="form-control" placeholder="Optional">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="custLocation" class="form-control" placeholder="City / State">
+    </div>
+  `, [
+    { label: 'Cancel',        cls: 'btn-outline', action: closeModal },
+    { label: 'Save Customer', cls: 'btn-primary',  action: _submitAddCustomer }
+  ]);
+}
+
+async function _submitAddCustomer() {
+  const name = (document.getElementById('custName').value || '').trim();
+  if (!name) { toast('Customer Name is required', 'warning'); return; }
+  showLoading('Saving...');
+  const res = await callAPI('createCustomer', {
+    customerName: name,
+    mobile      : document.getElementById('custMobile').value,
+    email       : document.getElementById('custEmail').value,
+    location    : document.getElementById('custLocation').value
+  });
+  hideLoading();
+  if (res.success) { toast(res.message || 'Customer created', 'success'); closeModal(); loadCustomers(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+function _editCustomer(c) {
+  openModal('Edit Customer', `
+    <div class="form-group">
+      <label class="form-label">Customer ID</label>
+      <input type="text" class="form-control" value="${c.Customer_ID}" readonly>
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Customer Name</label>
+      <input type="text" id="editCustName" class="form-control" value="${c.Customer_Name || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mobile Number</label>
+      <input type="text" id="editCustMobile" class="form-control" value="${c.Mobile || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="editCustEmail" class="form-control" value="${c.Email || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="editCustLocation" class="form-control" value="${c.Location || ''}">
+    </div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: 'Update', cls: 'btn-primary',  action: async () => {
+      const name = (document.getElementById('editCustName').value || '').trim();
+      if (!name) { toast('Customer Name is required', 'warning'); return; }
+      showLoading('Saving...');
+      const res = await callAPI('updateCustomer', {
+        customerId  : c.Customer_ID,
+        customerName: name,
+        mobile      : document.getElementById('editCustMobile').value,
+        email       : document.getElementById('editCustEmail').value,
+        location    : document.getElementById('editCustLocation').value
+      });
+      hideLoading();
+      if (res.success) { toast('Customer updated', 'success'); closeModal(); loadCustomers(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+async function deleteCustomer(id, name) {
+  if (!confirm('Delete customer "' + name + '"?\n\nThis cannot be undone.')) return;
+  showLoading('Deleting...');
+  const res = await callAPI('deleteCustomer', { customerId: id });
+  hideLoading();
+  if (res.success) { toast('Customer deleted', 'success'); loadCustomers(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+// ============================================================
+// ARTICLE MASTER
+// ============================================================
+
+async function loadArticles() {
+  showLoading('Loading articles...');
+  const res = await callAPI('getArticles', {});
+  hideLoading();
+  const articles = res.data || [];
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">🏷️ Article Master</div>
+      <div class="page-sub">${articles.length} articles</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="showAddArticleModal()">+ Add Article</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('artMasterTable','Articles')">⬇ Export</button>
+    </div>
+  </div>
+  <div class="card mb-2">
+    <div class="card-body" style="padding:12px">
+      <input type="text" id="artSearch" class="form-control"
+        placeholder="🔍 Search by article number or job card…"
+        oninput="filterArticles()" style="max-width:360px">
+    </div>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table class="table" id="artMasterTable">
+        <thead>
+          <tr>
+            <th>Article ID</th><th>Article Number</th><th>Job Card No.</th>
+            <th>Colors &amp; Qty</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="artTableBody">
+          ${articles.length === 0
+            ? '<tr><td colspan="6" class="table-empty">No articles found.</td></tr>'
+            : articles.map(a => _artRow(a)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function _artRow(a) {
+  const colors   = Array.isArray(a.Colors) ? a.Colors : [];
+  const chips    = colors.map(c =>
+    `<span class="badge badge-info" style="margin:2px">${c.color} (${c.qty})</span>`
+  ).join('');
+ 
+  // FIX: convert to String first — sheet can return numbers
+  const artNum   = String(a.Article_Number  || '');
+  const artId    = String(a.Article_ID      || '');
+  const jobCard  = String(a.Job_Card_Number || '');
+ 
+  const safeNum  = artNum.replace(/'/g, "\\'");
+ 
+  return `<tr
+    data-art="${artNum.toLowerCase()}"
+    data-job="${jobCard.toLowerCase()}">
+    <td class="mono fs-sm">${artId}</td>
+    <td class="fw-600">${artNum}</td>
+    <td class="fs-sm">${jobCard || '—'}</td>
+    <td style="max-width:240px">${chips || '—'}</td>
+    <td class="fs-sm">${fmtDate(a.Created_At)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-xs btn-outline"
+        onclick='_editArticle(${JSON.stringify(a)})'>✏️ Edit</button>
+      <button class="btn btn-xs btn-danger"
+        onclick="_deleteArticle('${artId}','${safeNum}')">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+async function _deleteArticle(id, number) {
+  if (!confirm('Delete article "' + number + '"?\n\nThis cannot be undone.')) return;
+  showLoading('Deleting...');
+  const res = await callAPI('deleteArticle', { articleId: id });
+  hideLoading();
+  if (res.success) { toast('Article deleted', 'success'); loadArticles(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+function filterArticles() {
+  const q = (document.getElementById('artSearch').value || '').toLowerCase();
+  document.querySelectorAll('#artTableBody tr[data-art]').forEach(tr => {
+    tr.style.display = (tr.dataset.art.includes(q) || tr.dataset.job.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Color row helpers ────────────────────────────────────────
+let _crCount = 0;
+
+function _colorRowHtml(idx, colorVal, qtyVal) {
+  return `<div class="color-row" id="cr${idx}"
+    style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <input type="text" class="form-control" placeholder="Color name"
+      value="${colorVal || ''}" style="flex:1">
+    <input type="number" class="form-control" placeholder="Qty"
+      value="${qtyVal !== undefined && qtyVal !== '' ? qtyVal : ''}"
+      style="width:100px" min="0">
+    <button type="button" class="btn btn-xs btn-danger"
+      onclick="_removeColorRow(this)" title="Remove">✕</button>
+  </div>`;
+}
+
+function _addColorRow() {
+  _crCount++;
+  const wrap = document.getElementById('colorRowsWrap');
+  const div  = document.createElement('div');
+  div.innerHTML = _colorRowHtml(_crCount, '', '');
+  wrap.appendChild(div.firstElementChild);
+}
+
+function _removeColorRow(btn) {
+  if (document.querySelectorAll('#colorRowsWrap .color-row').length <= 1) {
+    toast('At least one color is required', 'error'); return;
+  }
+  btn.closest('.color-row').remove();
+}
+
+function _readColorRows() {
+  const colors = [];
+  document.querySelectorAll('#colorRowsWrap .color-row').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    colors.push({ color: (inputs[0].value || '').trim(), qty: inputs[1].value });
+  });
+  return colors;
+}
+
+function _buildColorRows(colors) {
+  return (colors || [{ color: '', qty: '' }]).map((c, i) =>
+    _colorRowHtml(i, c.color, c.qty)
+  ).join('');
+}
+
+// ── Add / Edit Article modals ────────────────────────────────
+function showAddArticleModal() {
+  _crCount = 0;
+  openModal('Add Article', `
+    <div class="form-group">
+      <label class="form-label">Job Card Number <span class="text-muted fs-sm">(optional)</span></label>
+      <input type="text" id="artJobCard" class="form-control" placeholder="e.g. JC-2024-001">
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Article Number</label>
+      <input type="text" id="artNumber" class="form-control" placeholder="e.g. ART-101">
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Colors</label>
+      <div id="colorRowsWrap">${_colorRowHtml(0, '', '')}</div>
+      <button type="button" class="btn btn-outline btn-sm"
+        onclick="_addColorRow()" style="margin-top:6px">+ Add Color</button>
+    </div>
+  `, [
+    { label: 'Cancel',       cls: 'btn-outline', action: closeModal },
+    { label: 'Save Article', cls: 'btn-primary',  action: _submitAddArticle }
+  ]);
+}
+
+async function _submitAddArticle() {
+  const artNum = (document.getElementById('artNumber').value || '').trim();
+  if (!artNum) { toast('Article Number is required', 'warning'); return; }
+  const colors = _readColorRows();
+  showLoading('Saving...');
+  const res = await callAPI('createArticle', {
+    jobCardNumber: document.getElementById('artJobCard').value,
+    articleNumber: artNum,
+    colors
+  });
+  hideLoading();
+  if (res.success) { toast(res.message || 'Article created', 'success'); closeModal(); loadArticles(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+function _editArticle(a) {
+  // Normalise all fields to strings defensively
+  a.Article_Number  = String(a.Article_Number  || '');
+  a.Article_ID      = String(a.Article_ID      || '');
+  a.Job_Card_Number = String(a.Job_Card_Number || '');
+ 
+  _crCount = (a.Colors || []).length;
+ 
+  openModal('Edit Article', `
+    <div class="form-group">
+      <label class="form-label">Article ID</label>
+      <input type="text" class="form-control" value="${a.Article_ID}" readonly>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Job Card Number</label>
+      <input type="text" id="editArtJobCard" class="form-control"
+        value="${a.Job_Card_Number}">
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Article Number</label>
+      <input type="text" id="editArtNumber" class="form-control"
+        value="${a.Article_Number}">
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Colors</label>
+      <div id="colorRowsWrap">${_buildColorRows(a.Colors)}</div>
+      <button type="button" class="btn btn-outline btn-sm"
+        onclick="_addColorRow()" style="margin-top:6px">+ Add Color</button>
+    </div>
+  `, [
+    { label: 'Cancel', cls: 'btn-outline', action: closeModal },
+    { label: 'Update', cls: 'btn-primary',  action: async () => {
+      const artNum = (document.getElementById('editArtNumber').value || '').trim();
+      if (!artNum) { toast('Article Number is required', 'warning'); return; }
+      showLoading('Saving...');
+      const res = await callAPI('updateArticle', {
+        articleId    : a.Article_ID,
+        jobCardNumber: document.getElementById('editArtJobCard').value,
+        articleNumber: artNum,
+        colors       : _readColorRows()
+      });
+      hideLoading();
+      if (res.success) { toast('Article updated', 'success'); closeModal(); loadArticles(); }
+      else toast('Error: ' + res.error, 'error');
+    }}
+  ]);
+}
+
+async function deleteArticle(id, number) {
+  if (!confirm('Delete article "' + number + '"?\n\nThis cannot be undone.')) return;
+  showLoading('Deleting...');
+  const res = await callAPI('deleteArticle', { articleId: id });
+  hideLoading();
+  if (res.success) { toast('Article deleted', 'success'); loadArticles(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
+// ============================================================
+// SALES ORDERS
+// ============================================================
+
+async function loadSalesOrders() {
+  showLoading('Loading sales orders...');
+  const res = await callAPI('getSalesOrders', {});
+  hideLoading();
+  const orders = res.data || [];
+  document.getElementById('pageContent').innerHTML = `
+  <div class="page-header">
+    <div>
+      <div class="page-title">🛍️ Sales Orders</div>
+      <div class="page-sub">${orders.length} orders</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="showCreateSOModal()">+ New Sales Order</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTableToCSV('soTable','SalesOrders')">⬇ Export</button>
+    </div>
+  </div>
+  <div class="card mb-2">
+    <div class="card-body" style="padding:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="soSearch" class="form-control"
+        placeholder="🔍 Search SO ID or customer…"
+        oninput="_filterSOTable()" style="max-width:280px">
+      <select id="soStatusFilter" class="form-control"
+        onchange="_filterSOTable()" style="max-width:160px">
+        <option value="">All Status</option>
+        <option value="Pending">Pending</option>
+        <option value="Dispatched">Dispatched</option>
+      </select>
+    </div>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table class="table" id="soTable">
+        <thead>
+          <tr>
+            <th>SO ID</th><th>Customer</th><th>Article(s)</th>
+            <th>Total Qty</th><th>Net Amt (₹)</th><th>Status</th>
+            <th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="soTableBody">
+          ${orders.length === 0
+            ? '<tr><td colspan="8" class="table-empty">No sales orders found.</td></tr>'
+            : orders.map(o => _soTableRow(o)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function _soTableRow(o) {
+  const items   = Array.isArray(o.Line_Items) ? o.Line_Items : [];
+  const artList = [...new Set(items.map(l => l.articleNumber).filter(Boolean))].join(', ') || '—';
+  const badge   = o.Status === 'Dispatched'
+    ? '<span class="badge badge-success">🚚 Dispatched</span>'
+    : '<span class="badge badge-warning">⏳ Pending</span>';
+  return `<tr
+    data-so="${(o.SO_ID||'').toLowerCase()}"
+    data-cust="${(o.Customer_Name||'').toLowerCase()}"
+    data-status="${o.Status||''}">
+    <td class="mono fw-600">${o.SO_ID}</td>
+    <td class="fw-600">${o.Customer_Name}</td>
+    <td class="fs-sm">${artList}</td>
+    <td>${fmtNum(o.Total_Qty)}</td>
+    <td class="fw-bold">₹${fmtNum(o.Total_Net)}</td>
+    <td>${badge}</td>
+    <td class="fs-sm">${fmtDate(o.Created_At)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-xs btn-primary"
+        onclick="viewSOReceipt('${o.SO_ID}')">👁 View</button>
+      <button class="btn btn-xs btn-outline"
+        onclick="_showUpdateSOStatus('${o.SO_ID}','${o.Status}')">🔄 Status</button>
+      <button class="btn btn-xs btn-danger"
+        onclick="_deleteSO('${o.SO_ID}')">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+function _filterSOTable() {
+  const q      = (document.getElementById('soSearch').value || '').toLowerCase();
+  const status = document.getElementById('soStatusFilter').value;
+  document.querySelectorAll('#soTableBody tr[data-so]').forEach(tr => {
+    const mQ = !q || tr.dataset.so.includes(q) || tr.dataset.cust.includes(q);
+    const mS = !status || tr.dataset.status === status;
+    tr.style.display = (mQ && mS) ? '' : 'none';
+  });
+}
+
+// ── SO line item counter ─────────────────────────────────────
+let _soLiIdx = 0;
+let _soCustomersList = [];
+let _soArticlesList  = [];
+
+// ── Create SO Modal ──────────────────────────────────────────
+async function showCreateSOModal() {
+  showLoading('Loading data…');
+  const [custRes, artRes] = await Promise.all([
+    callAPI('getCustomers', {}),
+    callAPI('getArticles',  {})
+  ]);
+  hideLoading();
+
+  _soCustomersList = custRes.data || [];
+  _soArticlesList  = artRes.data  || [];
+  _soLiIdx = 0;
+
+  if (_soCustomersList.length === 0) {
+    toast('No customers found. Please add a customer first under Master Data → Customer Master.', 'error');
+    return;
+  }
+  if (_soArticlesList.length === 0) {
+    toast('No articles found. Please add an article first under Master Data → Article Master.', 'error');
+    return;
+  }
+
+  const custOpts = _soCustomersList.map(c =>
+    `<option value="${c.Customer_ID}">${c.Customer_ID} — ${c.Customer_Name}</option>`
+  ).join('');
+
+  openModal('New Sales Order', `
+    <div class="form-group">
+      <label class="form-label required">Customer</label>
+      <select id="soCustomerSel" class="form-control">
+        <option value="">— Select Customer —</option>
+        ${custOpts}
+      </select>
+    </div>
+    <div style="margin:16px 0 8px;font-weight:600;font-size:.9rem;color:var(--primary)">
+      Line Items
+    </div>
+    <div id="soLineItemsWrap"></div>
+    <button type="button" class="btn btn-outline btn-sm"
+      onclick="_addSOLineItem()" style="margin-bottom:12px">+ Add Line Item</button>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);
+      border-radius:8px;padding:12px;font-size:.88rem" id="soTotalsBox">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span>Gross Amount</span><span id="soGrossDisp">₹0.00</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;
+        color:var(--danger-light)">
+        <span>Total Discount</span><span id="soDiscDisp">₹0.00</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-weight:700;
+        border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+        <span>Net Total</span>
+        <span id="soNetDisp" style="color:var(--success-light)">₹0.00</span>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">Notes</label>
+      <input type="text" id="soNotes" class="form-control" placeholder="Optional remarks">
+    </div>
+  `, [
+    { label: 'Cancel',             cls: 'btn-outline', action: closeModal },
+    { label: 'Create Sales Order', cls: 'btn-primary',  action: _submitCreateSO }
+  ], 'modal-lg');
+
+  // Add first line item after modal renders
+  setTimeout(_addSOLineItem, 50);
+}
+
+function _soLineItemHtml(idx) {
+  const artOpts = _soArticlesList.map(a =>
+    `<option value="${a.Article_ID}"
+      data-colors='${JSON.stringify(a.Colors || [])}'
+      >${a.Article_Number}</option>`
+  ).join('');
+  const sizes = ['S','M','L','XL','XXL','XXXL','XXXXL'];
+
+  return `<div class="so-li-card" id="soLI${idx}"
+    style="border:1px solid var(--border);border-radius:8px;
+    padding:12px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;
+      align-items:center;margin-bottom:8px">
+      <span style="font-weight:600;font-size:.82rem;color:var(--primary)">
+        Item #${idx}
+      </span>
+      <button type="button" class="btn btn-xs btn-danger"
+        onclick="_removeSOLineItem(${idx})">✕ Remove</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Article *</label>
+        <select class="form-control" id="soArt${idx}"
+          onchange="_onArtChange(${idx})">
+          <option value="">— Select —</option>${artOpts}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Color *</label>
+        <select class="form-control" id="soColor${idx}">
+          <option value="">— Select Article first —</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Size *</label>
+        <select class="form-control" id="soSize${idx}">
+          <option value="">— Select —</option>
+          ${sizes.map(s => `<option>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Qty *</label>
+        <input type="number" class="form-control" id="soQty${idx}"
+          placeholder="0" min="1" oninput="_calcSOTotals()">
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Rate Per Piece (₹) *</label>
+        <input type="number" class="form-control" id="soRate${idx}"
+          placeholder="0.00" min="0" step="0.01" oninput="_calcSOTotals()">
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label class="form-label" style="font-size:.75rem">Discount %</label>
+        <input type="number" class="form-control" id="soDisc${idx}"
+          placeholder="0" min="0" max="100" step="0.01"
+          value="0" oninput="_calcSOTotals()">
+      </div>
+    </div>
+    <div style="font-size:.78rem;color:var(--text-muted);margin-top:6px;
+      display:flex;gap:14px">
+      <span>Gross: <strong id="soLiG${idx}">₹0</strong></span>
+      <span>Disc: <strong id="soLiD${idx}" style="color:var(--danger-light)">₹0</strong></span>
+      <span>Net: <strong id="soLiN${idx}" style="color:var(--success-light)">₹0</strong></span>
+    </div>
+  </div>`;
+}
+
+function _addSOLineItem() {
+  _soLiIdx++;
+  const wrap = document.getElementById('soLineItemsWrap');
+  if (!wrap) return;
+  const div = document.createElement('div');
+  div.innerHTML = _soLineItemHtml(_soLiIdx);
+  wrap.appendChild(div.firstElementChild);
+}
+
+function _removeSOLineItem(idx) {
+  if (document.querySelectorAll('.so-li-card').length <= 1) {
+    toast('At least one line item is required', 'error'); return;
+  }
+  const el = document.getElementById('soLI' + idx);
+  if (el) el.remove();
+  _calcSOTotals();
+}
+
+function _onArtChange(idx) {
+  const sel    = document.getElementById('soArt' + idx);
+  const opt    = sel.options[sel.selectedIndex];
+  let colors   = [];
+  try { colors = JSON.parse(opt.dataset.colors || '[]'); } catch(e) {}
+  const cs = document.getElementById('soColor' + idx);
+  cs.innerHTML = colors.length
+    ? colors.map(c => `<option value="${c.color}">${c.color}</option>`).join('')
+    : '<option value="">No colors for this article</option>';
+}
+
+function _calcSOTotals() {
+  let gTotal = 0, dTotal = 0, nTotal = 0;
+  document.querySelectorAll('.so-li-card').forEach(card => {
+    const id   = card.id.replace('soLI', '');
+    const qty  = parseFloat(document.getElementById('soQty'  + id)?.value) || 0;
+    const rate = parseFloat(document.getElementById('soRate' + id)?.value) || 0;
+    const disc = parseFloat(document.getElementById('soDisc' + id)?.value) || 0;
+    const g    = qty * rate;
+    const d    = g * disc / 100;
+    const n    = g - d;
+    gTotal += g; dTotal += d; nTotal += n;
+    const gEl = document.getElementById('soLiG' + id);
+    const dEl = document.getElementById('soLiD' + id);
+    const nEl = document.getElementById('soLiN' + id);
+    if (gEl) gEl.textContent = '₹' + g.toFixed(2);
+    if (dEl) dEl.textContent = '₹' + d.toFixed(2);
+    if (nEl) nEl.textContent = '₹' + n.toFixed(2);
+  });
+  const gD = document.getElementById('soGrossDisp');
+  const dD = document.getElementById('soDiscDisp');
+  const nD = document.getElementById('soNetDisp');
+  if (gD) gD.textContent = '₹' + gTotal.toFixed(2);
+  if (dD) dD.textContent = '₹' + dTotal.toFixed(2);
+  if (nD) nD.textContent = '₹' + nTotal.toFixed(2);
+}
+
+async function _submitCreateSO() {
+  const customerId = document.getElementById('soCustomerSel').value;
+  if (!customerId) { toast('Please select a customer', 'error'); return; }
+
+  const lineItems = [];
+  let valid = true;
+
+  document.querySelectorAll('.so-li-card').forEach(card => {
+    if (!valid) return;
+    const id     = card.id.replace('soLI', '');
+    const artSel = document.getElementById('soArt'   + id);
+    const colSel = document.getElementById('soColor' + id);
+    const sizSel = document.getElementById('soSize'  + id);
+    const qty    = document.getElementById('soQty'   + id)?.value;
+    const rate   = document.getElementById('soRate'  + id)?.value;
+    const disc   = document.getElementById('soDisc'  + id)?.value || '0';
+    if (!artSel?.value || !colSel?.value || !sizSel?.value || !qty || !rate) {
+      toast('Please fill all required fields (*) in every line item', 'error');
+      valid = false; return;
+    }
+    lineItems.push({
+      articleId    : artSel.value,
+      articleNumber: artSel.options[artSel.selectedIndex]?.text || '',
+      color        : colSel.value,
+      size         : sizSel.value,
+      qty, ratePerPiece: rate, discountPct: disc
+    });
+  });
+
+  if (!valid || lineItems.length === 0) return;
+
+  showLoading('Creating Sales Order...');
+  const res = await callAPI('createSalesOrder', {
+    customerId,
+    lineItems,
+    notes: document.getElementById('soNotes')?.value || ''
+  });
+  hideLoading();
+  if (res.success) {
+    toast(res.message || 'Sales Order created', 'success');
+    closeModal();
+    loadSalesOrders();
+  } else {
+    toast('Error: ' + res.error, 'error');
+  }
+}
+
+// ── View SO Receipt ──────────────────────────────────────────
+async function viewSOReceipt(soId) {
+  showLoading('Loading receipt…');
+  const res = await callAPI('getSalesOrderById', { soId });
+  hideLoading();
+  if (!res.success) { toast('Error: ' + res.error, 'error'); return; }
+  const o     = res.data;
+  const items = Array.isArray(o.Line_Items) ? o.Line_Items : [];
+  const now   = new Date().toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  const lineRows = items.map((l, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${l.articleNumber || '—'}</td>
+      <td>${l.color}</td>
+      <td>${l.size}</td>
+      <td style="text-align:right">${fmtNum(l.qty)}</td>
+      <td style="text-align:right">₹${fmtNum(l.ratePerPiece)}</td>
+      <td style="text-align:right">₹${fmtNum(l.grossAmount)}</td>
+      <td style="text-align:right">${l.discountPct}%</td>
+      <td style="text-align:right">₹${fmtNum(l.discountAmount)}</td>
+      <td style="text-align:right;font-weight:700;color:#059669">
+        ₹${fmtNum(l.netAmount)}
+      </td>
+    </tr>`).join('');
+
+  const html = `
+  <div id="soReceiptArea" style="font-family:Arial,sans-serif;
+    color:#111;background:#fff;padding:20px">
+    <div style="display:flex;justify-content:space-between;
+      align-items:flex-start;margin-bottom:18px;padding-bottom:14px;
+      border-bottom:2px solid #FF8608">
+      <div>
+        <div style="font-size:1.3rem;font-weight:800;color:#FF8608">
+          SALES ORDER
+        </div>
+        <div style="font-size:.82rem;color:#666;margin-top:3px">
+          Receipt / Confirmation
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:.95rem;font-weight:700">${o.SO_ID}</div>
+        <div style="font-size:.78rem;color:#666">Date: ${now}</div>
+        <div style="margin-top:5px">
+          <span style="padding:2px 10px;border-radius:20px;font-size:.72rem;
+            font-weight:700;
+            background:${o.Status==='Dispatched'?'#D1FAE5':'#FFF3CD'};
+            color:${o.Status==='Dispatched'?'#065F46':'#92400E'}">
+            ${o.Status === 'Dispatched' ? '🚚 DISPATCHED' : '⏳ PENDING'}
+          </span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:.72rem;color:#888;text-transform:uppercase;
+        letter-spacing:.05em">Bill To</div>
+      <div style="font-size:.95rem;font-weight:700;margin-top:3px">
+        ${o.Customer_Name}
+      </div>
+      <div style="font-size:.78rem;color:#555">${o.Customer_ID}</div>
+    </div>
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+        <thead>
+          <tr style="background:#FF8608;color:#fff">
+            <th style="padding:7px 5px;text-align:left">#</th>
+            <th style="padding:7px 5px;text-align:left">Article</th>
+            <th style="padding:7px 5px;text-align:left">Color</th>
+            <th style="padding:7px 5px;text-align:left">Size</th>
+            <th style="padding:7px 5px;text-align:right">Qty</th>
+            <th style="padding:7px 5px;text-align:right">Rate</th>
+            <th style="padding:7px 5px;text-align:right">Gross</th>
+            <th style="padding:7px 5px;text-align:right">Disc%</th>
+            <th style="padding:7px 5px;text-align:right">Disc Amt</th>
+            <th style="padding:7px 5px;text-align:right">Net Amt</th>
+          </tr>
+        </thead>
+        <tbody>${lineRows}</tbody>
+        <tfoot>
+          <tr style="border-top:2px solid #FF8608">
+            <td colspan="6" style="padding:7px 5px;font-weight:700">TOTALS</td>
+            <td style="padding:7px 5px;text-align:right;font-weight:700">
+              ₹${fmtNum(o.Total_Gross)}
+            </td>
+            <td></td>
+            <td style="padding:7px 5px;text-align:right;
+              font-weight:700;color:#dc2626">
+              ₹${fmtNum(o.Total_Discount)}
+            </td>
+            <td style="padding:7px 5px;text-align:right;
+              font-weight:800;color:#059669;font-size:.88rem">
+              ₹${fmtNum(o.Total_Net)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    ${o.Notes
+      ? `<div style="font-size:.78rem;color:#555;padding:8px;
+          background:#f9f9f9;border-radius:5px;margin-bottom:14px">
+          <strong>Notes:</strong> ${o.Notes}</div>`
+      : ''}
+    <div style="font-size:.68rem;color:#999;text-align:center;
+      border-top:1px solid #eee;padding-top:10px">
+      Generated by Inventory ERP · ${o.SO_ID} · ${now}
+    </div>
+  </div>`;
+
+  openModal('Sales Order: ' + o.SO_ID, html, [
+    { label: 'Close',           cls: 'btn-outline', action: closeModal },
+    { label: '🖨️ Print Receipt', cls: 'btn-primary',  action: () => {
+      const w = window.open('', '_blank');
+      w.document.write(`<!DOCTYPE html><html><head><title>${o.SO_ID}</title>
+        <style>
+          body{font-family:Arial,sans-serif;margin:20px}
+          table{width:100%;border-collapse:collapse}
+          th,td{border:1px solid #ddd;padding:6px}
+          th{background:#FF8608;color:#fff}
+          @media print{.no-print{display:none}}
+        </style></head><body>
+        ${document.getElementById('soReceiptArea').innerHTML}
+        <script>window.onload=()=>window.print()<\/script>
+        </body></html>`);
+      w.document.close();
+    }}
+  ], 'modal-lg');
+}
+
+// ── Update SO Status ─────────────────────────────────────────
+function _showUpdateSOStatus(soId, currentStatus) {
+  openModal('Update SO Status', `
+    <div style="text-align:center;padding:12px 0">
+      <div style="font-size:.88rem;margin-bottom:16px">
+        Sales Order <strong>${soId}</strong><br>
+        Current: <span class="badge ${currentStatus==='Dispatched'
+          ?'badge-success':'badge-warning'}">${currentStatus}</span>
+      </div>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="btn btn-outline" style="min-width:120px"
+          onclick="document.getElementById('soNewSt').value='Pending'">
+          ⏳ Pending
+        </button>
+        <button class="btn btn-success" style="min-width:120px"
+          onclick="document.getElementById('soNewSt').value='Dispatched'">
+          🚚 Dispatched
+        </button>
+      </div>
+      <input type="hidden" id="soNewSt" value="${currentStatus}">
+      <div style="margin-top:10px;font-size:.8rem;color:var(--text-muted)">
+        Click a status above, then click Update.
+      </div>
+    </div>
+  `, [
+    { label: 'Cancel',        cls: 'btn-outline', action: closeModal },
+    { label: 'Update Status', cls: 'btn-primary',  action: async () => {
+      const newStatus = document.getElementById('soNewSt').value;
+      showLoading('Updating...');
+      const res = await callAPI('updateSOStatus', { soId, status: newStatus });
+      hideLoading();
+      if (res.success) {
+        toast('Status updated to ' + newStatus, 'success');
+        closeModal();
+        loadSalesOrders();
+      } else {
+        toast('Error: ' + res.error, 'error');
+      }
+    }}
+  ]);
+}
+
+// ── Delete SO ────────────────────────────────────────────────
+async function _deleteSO(soId) {
+  if (!confirm('Delete Sales Order ' + soId + '?\n\nThis cannot be undone.')) return;
+  showLoading('Deleting...');
+  const res = await callAPI('deleteSalesOrder', { soId });
+  hideLoading();
+  if (res.success) { toast('Sales Order deleted', 'success'); loadSalesOrders(); }
+  else toast('Error: ' + res.error, 'error');
+}
+
 </script>
